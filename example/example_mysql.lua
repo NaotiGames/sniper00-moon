@@ -3,7 +3,7 @@ local moon = require("moon")
 
 local mysql = require("moon.db.mysql")
 moon.async(function()
-        local db = mysql.connect({
+        local db, err = mysql.connect({
         host="127.0.0.1",
         port=3306,
         database="mysql",
@@ -14,7 +14,7 @@ moon.async(function()
     })
 
     if db.code then
-        print_r(db)
+        print(db.err)
         return
     end
 
@@ -37,7 +37,7 @@ moon.async(function()
 
     -- bad sql statement
     local res =  db:query("select * from notexisttable" )
-    print("bad query test result=\n"..print_r(res,true))
+    print_r(res, "bad query test result=")
 
     local i=1
     while true do

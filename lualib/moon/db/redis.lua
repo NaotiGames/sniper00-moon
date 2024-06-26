@@ -165,9 +165,9 @@ end
 
 local function request(fd, req, res, israw)
 	if israw then
-		socket.write(fd,  req)
+		socket.write_message(fd,  req)
 	else
-		socket.write(fd, buffer.concat(req))
+		socket.write(fd,  buffer.concat(req))
 	end
 	if not res then
 		return true

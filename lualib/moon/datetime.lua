@@ -102,7 +102,6 @@ end
 ---@param time integer @POSIX timestamp
 ---@return osdate
 function datetime.localtime(time)
----@diagnostic disable-next-line: return-type-mismatch
     return os.date("*t", time)
 end
 
