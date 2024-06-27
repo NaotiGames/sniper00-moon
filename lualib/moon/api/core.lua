@@ -1,14 +1,17 @@
 error("DO NOT REQUIRE THIS FILE")
 
---- lightuserdata buffer*
----@class buffer_ptr
-
---- lightuserdata message*
 ---@meta
 
+--- lightuserdata, cpp type `buffer*`
+---@class buffer_ptr
+
+--- lightuserdata, cpp type `message*`
 ---@class message_ptr
 
---- lightuserdata char*
+--- userdata buffer_shr_ptr
+---@class buffer_shr_ptr
+
+--- lightuserdata, cpp type `char*`
 ---@class cstring_ptr
 
 ---@class core
@@ -69,6 +72,9 @@ function core.kill(addr) end
 --- query **unique** service's address by name
 function core.queryservice(name) end
 
+---@return integer
+function core.next_sequence() end
+
 --- set or get env
 ---@param key string
 ---@param value? string
@@ -100,7 +106,8 @@ function core.now() end
 --- - 'E' message:sessionid()
 --- - 'Z' message:bytes()
 --- - 'N' message:size()
---- - 'B' message:buffer()
+--- - 'B' message:get_buffer()
+--- - 'L' return buffer_ptr,leak buffer ownership from message
 --- - 'C' message:buffer():data() and message:buffer():size()
 ---@param msg message_ptr
 ---@param pattern string
@@ -108,25 +115,18 @@ function core.now() end
 ---@nodiscard
 function core.decode(msg, pattern) end
 
----clone message, but share buffer field
----@param msg message_ptr
----@return userdata
-function core.clone(msg) end
-
----release clone message
----@param msg message_ptr
-function core.release(msg) end
-
 ---redirect a message to other service
 function core.redirect(msg, receiver, mtype, sender, sessionid) end
 
 ---@class asio
 local asio = {}
 
+--- Check port bindable or connectable
 ---@param host string
 ---@param port integer
+---@param is_connect? boolean @ bind or connect
 ---@return boolean
-function asio.try_open(host, port) end
+function asio.try_open(host, port, is_connect) end
 
 ---param protocol moon.PTYPE_SOCKET_TCP, moon.PTYPE_SOCKET_MOON, moon.PTYPE_SOCKET_WS
 ---@param host string
@@ -137,10 +137,10 @@ function asio.listen(host, port, protocol) end
 
 ---send data to fd
 ---@param fd integer
----@param data string|buffer_ptr
----@param flag? integer
+---@param data string|buffer_ptr|buffer_shr_ptr
+---@param mask? integer
 ---@return boolean
-function asio.write(fd, data, flag) end
+function asio.write(fd, data, mask) end
 
 ---@param fd integer
 ---@param m message_ptr
@@ -163,7 +163,7 @@ function asio.setnodelay(fd) end
 ---| 'rw'
 ---| 'wr'
 
---- 对于PTYPE_SOCKET_MOON类型的协议, 默认最大长度是32767字节。
+--- 对于PTYPE_SOCKET_MOON类型的协议, 默认最大长度是65534字节。
 --- 可以设置chunkmode, 允许收发大于这个长度消息, 底层的处理是对消息进行切片。
 ---@param fd integer
 ---@param mode chunkmode
@@ -199,5 +199,9 @@ function asio.udp_connect(fd, host, port) end
 ---@param port integer
 ---@return string @addr bytes string
 function asio.make_endpoint(host, port) end
+
+---
+--- 切换协议类型, 要求fd关联的socket的type为moon.PTYPE_SOCKET_TCP. 现在只用于webscoket.
+function asio.switch_type(fd, type) end
 
 return core

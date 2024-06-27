@@ -1,5 +1,6 @@
 local moon = require("moon")
 local seri = require("seri")
+local buffer = require("buffer")
 
 local conf = ...
 
@@ -33,9 +34,7 @@ local function cluster_service()
             senders = {}
             send_watch[fd] = senders
         end
-        local key = (sessionid<<32)|sender
-        --print("addkey", key, sessionid)
-        senders[key] = moon.time()
+        senders[sessionid.."-"..sender] = moon.time()
     end
 
     local function remove_send_watch( fd, sender, sessionid )
@@ -45,9 +44,7 @@ local function cluster_service()
             return
         end
 
-        local key = (sessionid<<32)|sender
-        --print("remove key", key, sessionid)
-        senders[key] = nil
+        senders[sessionid.."-"..sender] = nil
         return true
     end
 
@@ -94,10 +91,10 @@ local function cluster_service()
                     moon.error("An error occurred while receiving the cluster.call message:", message)
                     return
                 end
-                local session = moon.make_session(address)
+                local session = moon.next_sequence()
                 redirect(msg, address, moon.PTYPE_LUA, moon.id, -session)
                 header.session = -header.session
-                socket.write(fd, pack(header, moon.wait(session)))
+                socket.write(fd, pack(header, moon.wait(session, address)))
             end)
         elseif header.session > 0 then --receive response message
             if remove_send_watch(fd, header.from_addr, header.session) then
@@ -125,9 +122,11 @@ local function cluster_service()
         local senders = send_watch[fd]
         if senders then
             for key in pairs(senders) do
-                local sender = key&0xFFFFFFFF
-                local sessionid = (key>>32)
+                local arr = string.split(key,"-")
+                local sessionid = tonumber(arr[1])
+                local sender = tonumber(arr[2])
                 print("response to sender service", sender, sessionid)
+                ---@diagnostic disable-next-line: param-type-mismatch
                 moon.response("lua", sender, -sessionid, false, "cluster:socket disconnect")
             end
         end
@@ -179,11 +178,15 @@ local function cluster_service()
     end
 
     function command.Request(msg)
-        ---@type cluster_header
-        local header = unpack_one(moon.decode(msg, "B"))
 
+        local buf = moon.decode(msg, "L")
+
+        ---@type cluster_header
+        local header = unpack_one(buf)
+
+		local shr = buffer.to_shared(buf)
         local c = clusters[header.to_node]
-        if c and c.fd and socket.write_message(c.fd, msg) then
+        if c and c.fd and socket.write(c.fd, shr) then
             if header.session < 0 then
                 --记录mode-call消息，网络断开时，返回错误信息
                 add_send_watch(c.fd, header.from_addr, -header.session)
@@ -195,7 +198,7 @@ local function cluster_service()
             end
         end
 
-        local data = moon.decode(msg, "Z")
+        local data = buffer.unpack(buf)
 
         local scope<close> = lock()
 
@@ -336,18 +339,18 @@ function cluster.call(receiver_node, receiver_sname, ...)
         assert(cluster_address>0)
     end
 
-    local sessionid = moon.make_session(cluster_address)
+    local session = moon.next_sequence()
 
     local header = {
         to_node = receiver_node,
         to_sname = receiver_sname,
         from_node = NODE,
         from_addr = moon.id,
-        session = -sessionid
+        session = -session
     }
 
     moon.raw_send("lua", cluster_address, pack("Request", header, ...))
-    return moon.wait(sessionid)
+    return moon.wait(session)
 end
 
 return cluster

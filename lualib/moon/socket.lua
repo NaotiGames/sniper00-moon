@@ -1,7 +1,6 @@
 local moon = require("moon")
-local core = require("asio")
+local core = require("asio.core")
 
-local make_session = moon.make_session
 local id = moon.id
 
 local close = core.close
@@ -12,10 +11,8 @@ local write = core.write
 local udp = core.udp
 local unpack_udp = core.unpack_udp
 
-local flag_close = 2
-local flag_ws_text = 16
-local flag_ws_ping = 32
-local flag_ws_pong = 64
+local mask_close<const> = 2
+local mask_raw<const> = 32
 
 local supported_tcp_protocol = {
     [moon.PTYPE_SOCKET_TCP] = "tcp",
@@ -29,16 +26,15 @@ local supported_tcp_protocol = {
 ---@class socket : asio
 local socket = core
 
+socket.mask_raw = mask_raw
+
 ---@async
 ---@param listenfd integer
 ---@param serviceid? integer
 function socket.accept(listenfd, serviceid)
+    assert(listenfd>0, "Invalid listenfd")
     serviceid = serviceid or id
-    local sessionid = make_session()
-    if not accept(listenfd, sessionid, serviceid) then
-        error("invalid accept param")
-    end
-    local fd, err = moon.wait(sessionid)
+    local fd, err = moon.wait(accept(listenfd, serviceid))
     if not fd then
         return nil, err
     end
@@ -46,72 +42,53 @@ function socket.accept(listenfd, serviceid)
 end
 
 function socket.start(listenfd)
-    accept(listenfd, 0, id)
+    assert(listenfd>0, "Invalid listenfd")
+    accept(listenfd, id, 0)
 end
 
 ---@async
 ---@param host string
 ---@param port integer
----@param protocol integer|string # "tcp", "ws", "moon" 
+---@param protocol integer|string # "tcp", "ws", "moon"
 ---@param timeout? integer # millseconds
----@param payload? string # payload data, e. websocket's path
-function socket.connect(host, port, protocol, timeout, payload)
+function socket.connect(host, port, protocol, timeout)
     assert(supported_tcp_protocol[protocol], "not support")
     if type(protocol) == "string" then
         protocol = supported_tcp_protocol[protocol]
     end
     timeout = timeout or 0
-    local sessionid = make_session()
-    connect(host, port, protocol, sessionid, timeout, payload)
-    local fd, err = moon.wait(sessionid)
+    local fd, err = moon.wait(connect(host, port, protocol, timeout))
     if not fd then
         return nil, err
     end
     return fd
 end
 
+--- NOTE:  used only when protocol == moon.PTYPE_SOCKET_TCP
 ---@async
----@param host string
----@param port integer
----@param protocol integer # moon.PTYPE_SOCKET_TCP, moon.PTYPE_SOCKET_MOON, moon.PTYPE_SOCKET_WS
----@param payload? string # payload data, e. websocket's path
-function socket.sync_connect(host, port, protocol, payload)
-    assert(supported_tcp_protocol[protocol], "not support")
-    local fd = connect(host, port, protocol, 0, 0, payload)
-    if fd == 0 then
-        return nil, "connect failed"
-    end
-    return fd
-end
-
---- used only when protocol == moon.PTYPE_SOCKET_TCP
----@async
----@param delim string @read until reach the specified delim string from the socket
+---@param delim string @Read until reach the specified delim string from the socket. Max length is 7 bytes.
 ---@param maxcount? integer
 ---@overload fun(fd: integer, count: integer) @ read a specified number of bytes from the socket.
 function socket.read(fd, delim, maxcount)
-    local sessionid = make_session()
-    read(fd, sessionid, delim, maxcount)
-    return moon.wait(sessionid)
+    local session, data = read(fd, delim, maxcount)
+    if session and data then
+        return data
+    end
+    return moon.wait(session, data)
 end
 
+---@param fd integer
+---@param data string|buffer_ptr|buffer_shr_ptr
 function socket.write_then_close(fd, data)
-    write(fd, data, flag_close)
+    write(fd, data, mask_close)
 end
 
---- PTYPE_SOCKET_WS specific functions
-function socket.write_text(fd, data)
-    write(fd, data, flag_ws_text)
-end
-
---- PTYPE_SOCKET_WS specific functions
-function socket.write_ping(fd, data)
-    write(fd, data, flag_ws_ping)
-end
-
---- PTYPE_SOCKET_WS specific functions
-function socket.write_pong(fd, data)
-    write(fd, data, flag_ws_pong)
+--- This function sends raw network data, bypassing any message encoding.
+--- If you need to send data that must be encoded in a specific way, you should encode the data before calling this function.
+---@param fd integer
+---@param data string|buffer_ptr|buffer_shr_ptr The data to be written. This can be a string, a buffer pointer, or a shared buffer pointer.
+function socket.write_raw(fd, data)
+    write(fd, data, mask_raw)
 end
 
 local socket_data_type = {
@@ -119,8 +96,6 @@ local socket_data_type = {
     accept = 2,
     message = 3,
     close = 4,
-    ping = 5,
-    pong = 6,
 }
 
 ---@alias socket_event
@@ -129,19 +104,8 @@ local socket_data_type = {
 ---| 'message'
 ---| 'close'
 
----@alias websocket_event
----| 'connect'
----| 'accept'
----| 'message'
----| 'close'
----| 'ping'
----| 'pong'
-
 --- PTYPE_SOCKET_MOON callbacks
 local callbacks = {}
-
---- PTYPE_SOCKET_WS wscallbacks
-local wscallbacks = {}
 
 local _decode = moon.decode
 
@@ -156,17 +120,7 @@ moon.raw_dispatch(
     end
 )
 
-moon.raw_dispatch(
-    "websocket",
-    function(msg)
-        local fd, sdt = _decode(msg, "SR")
-        local f = wscallbacks[sdt]
-        if f then
-            f(fd, msg)
-        end
-    end
-)
-
+--- NOTE: used only when protocol == moon.PTYPE_SOCKET_MOON
 ---@param name socket_event
 ---@param cb fun(fd:integer, msg:message_ptr)
 function socket.on(name, cb)
@@ -175,17 +129,6 @@ function socket.on(name, cb)
         callbacks[n] = cb
     else
         error("register unsupport socket data type " .. name)
-    end
-end
-
----@param name websocket_event
----@param cb fun(fd:integer, msg:message_ptr)
-function socket.wson(name, cb)
-    local n = socket_data_type[name]
-    if n then
-        wscallbacks[n] = cb
-    else
-        error("register unsupport websocket data type " .. name)
     end
 end
 
@@ -217,16 +160,6 @@ end
 function socket.close(fd)
     close(fd)
     udp_callbacks[fd] = nil
-end
-
-function socket.parse_host_port(host_port, defaultport)
-    local host, port = host_port:match("([^:]+):?(%d*)$")
-    if port == "" then
-        port = defaultport
-    else
-        port = math.tointeger(port)
-    end
-    return host, port
 end
 
 return socket

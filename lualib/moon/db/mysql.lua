@@ -7,7 +7,7 @@
 -- protocol detail: https://mariadb.com/kb/en/clientserver-protocol/
 
 
-local moon = require "moon"
+local buffer = require "buffer"
 local crypt = require("crypt")
 local socketchannel = require("moon.db.socketchannel")
 
@@ -26,6 +26,8 @@ local tonumber = tonumber
 local tointeger = math.tointeger
 
 ---@class mysql
+---@field _server_ver string
+---@field sockchannel socketchannel
 local _M = {_VERSION = "0.14"}
 
 -- the following charset map is generated from the following mysql query:
@@ -100,6 +102,17 @@ converters[0x08] = tonumber -- long long
 converters[0x09] = tonumber -- int24
 converters[0x0d] = tonumber -- year
 converters[0xf6] = tonumber -- newdecimal
+
+local function format_response(resp)
+    if resp.err and resp.sqlstate == nil then
+        resp.sqlstate = "SOCKET"
+    end
+    resp.code = resp.sqlstate
+    resp.message = resp.err
+    resp.sqlstate = nil
+    resp.err = nil
+    return resp
+end
 
 local function _get_byte1(data, i)
     return strbyte(data, i), i + 1
@@ -516,7 +529,10 @@ local function _mysql_login(self, user, password, charset, database, on_connect)
             database
         )
         local authpacket = _compose_packet(self, req)
-        sockchannel:request(authpacket, dispatch_resp)
+        local res = sockchannel:request(authpacket, dispatch_resp)
+        if res.code then
+            error(res.message)
+        end
         if on_connect then
             on_connect(self)
         end
@@ -704,7 +720,7 @@ local function _query_resp(self)
             local badresult = {}
             badresult.badresult = true
             badresult.err = err
-            badresult.code = errno
+            badresult.errno = errno
             badresult.sqlstate = sqlstate
             return true, badresult
         end
@@ -719,7 +735,7 @@ local function _query_resp(self)
             if not res then
                 multiresultset.badresult = true
                 multiresultset.err = err
-                multiresultset.code = errno
+                multiresultset.errno = errno
                 multiresultset.sqlstate = sqlstate
                 return true, multiresultset
             end
@@ -768,14 +784,14 @@ end
 
 function _M.query(self, query)
     if type(query) == "userdata" then
-        query = moon.decode(query, "Z")
+        query = buffer.unpack(query)
     end
     local querypacket = _compose_query(self, query)
     local sockchannel = self.sockchannel
     if not self.query_resp then
         self.query_resp = _query_resp(self)
     end
-    return sockchannel:request(querypacket, self.query_resp)
+    return format_response(sockchannel:request(querypacket, self.query_resp))
 end
 
 local function read_prepare_result(self, sock)
@@ -783,7 +799,7 @@ local function read_prepare_result(self, sock)
     local packet, typ, err = _recv_packet(self, sock)
     if not packet then
         resp.badresult = true
-        resp.code = 300101
+        resp.errno = 300101
         resp.err = err
         return false, resp
     end
@@ -791,7 +807,7 @@ local function read_prepare_result(self, sock)
     if typ == "ERR" then
         local errno, msg, sqlstate = _parse_err_packet(packet)
         resp.badresult = true
-        resp.code = errno
+        resp.errno = errno
         resp.err = msg
         resp.sqlstate = sqlstate
         return true, resp
@@ -800,7 +816,7 @@ local function read_prepare_result(self, sock)
     --第一节只能是OK
     if typ ~= "OK" then
         resp.badresult = true
-        resp.code = 300201
+        resp.errno = 300201
         resp.err = "first typ must be OK,now" .. typ
         return false, resp
     end
@@ -840,7 +856,7 @@ function _M.prepare(self, sql)
     if not self.prepare_resp then
         self.prepare_resp = _prepare_resp(self)
     end
-    return sockchannel:request(querypacket, self.prepare_resp)
+    return format_response(sockchannel:request(querypacket, self.prepare_resp))
 end
 
 local function _get_datetime(data, pos)
@@ -1008,7 +1024,7 @@ local function _execute_resp(self)
             local badresult = {}
             badresult.badresult = true
             badresult.err = err
-            badresult.code = errno
+            badresult.errno = errno
             badresult.sqlstate = sqlstate
             return true, badresult
         end
@@ -1023,7 +1039,7 @@ local function _execute_resp(self)
             if not res then
                 mulitresultset.badresult = true
                 mulitresultset.err = err
-                mulitresultset.code = errno
+                mulitresultset.errno = errno
                 mulitresultset.sqlstate = sqlstate
                 return true, mulitresultset
             end
@@ -1045,7 +1061,7 @@ end
 function _M.execute(self, stmt, ...)
     local querypacket, er = _compose_stmt_execute(self, stmt, CURSOR_TYPE_NO_CURSOR, table.pack(...))
     if not querypacket then
-        return {
+        return format_response {
             badresult = true,
             errno = 30902,
             err = er
@@ -1055,7 +1071,7 @@ function _M.execute(self, stmt, ...)
     if not self.execute_resp then
         self.execute_resp = _execute_resp(self)
     end
-    return sockchannel:request(querypacket, self.execute_resp)
+    return format_response(sockchannel:request(querypacket, self.execute_resp))
 end
 
 local function _compose_stmt_reset(self, stmt)
@@ -1072,7 +1088,7 @@ function _M.stmt_reset(self, stmt)
         if not self.query_resp then
         self.query_resp = _query_resp(self)
     end
-    return sockchannel:request(querypacket, self.query_resp)
+    return format_response(sockchannel:request(querypacket, self.query_resp))
 end
 
 local function _compose_stmt_close(self, stmt)
@@ -1086,14 +1102,14 @@ end
 function _M.stmt_close(self, stmt)
     local querypacket = _compose_stmt_close(self, stmt)
     local sockchannel = self.sockchannel
-    return sockchannel:request(querypacket)
+    return format_response(sockchannel:request(querypacket))
 end
 
 
 function _M.ping(self)
     local querypacket, er = _compose_ping(self)
     if not querypacket then
-        return {
+        return format_response {
             badresult = true,
             errno = 30902,
             err = er
@@ -1103,7 +1119,7 @@ function _M.ping(self)
     if not self.query_resp then
         self.query_resp = _query_resp(self)
     end
-    return sockchannel:request(querypacket, self.query_resp)
+    return format_response(sockchannel:request(querypacket, self.query_resp))
 end
 
 function _M.server_ver(self)
@@ -1128,6 +1144,10 @@ end
 
 function _M.set_compact_arrays(self, value)
     self.compact = value
+end
+
+function _M.pack_query_buffer()
+    -- compat with sqldriver
 end
 
 return _M

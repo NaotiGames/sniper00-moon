@@ -150,8 +150,7 @@ end
 
 local function send_message(self, t, data)
     local buf = concat(data)
-    local len = bsize(buf)
-    wfront(buf, t, strpack(">I", len+4))
+    wfront(buf, t, strpack(">I", bsize(buf)+4))
     socket.write(self.sock, buf)
 end
 
@@ -175,9 +174,8 @@ local function send_startup_message(self)
         NULL
     }
 
-    local str = buffer.concat_string(data)
-
-    socket.write(self.sock, buffer.concat_string(encode_int(#str + 4), data))
+    local startup_message = buffer.concat_string(data)
+    socket.write(self.sock, buffer.concat_string(encode_int(#startup_message + 4), startup_message))
 end
 
 local function parse_error(err_msg)
@@ -262,7 +260,7 @@ local function auth(self)
     elseif 5 == _exp_0 then
         return md5_auth(self, msg)
     else
-        return error("don't know how to auth: " .. tostring(auth_type))
+        return error(string.format("don't know how to auth, auth_type: %s.", auth_type))
     end
 end
 
@@ -283,19 +281,18 @@ local function wait_until_ready(self)
     return true
 end
 
----@class pg_error
----@field public code integer
----@field public err string
-
 ---@class pg_result
+---@field public code? integer
 ---@field public data table @ table rows
 ---@field public num_queries integer
 ---@field public notifications integer
----@field public errmsg string @ error message
+---@field public message string @ error message
 ---@field public errdata table @ error detail info
 
 ---@class pg
 ---@field public sock integer @ socket fd
+---@field public code? integer
+---@field public message? string
 local pg = {}
 
 pg.disconnect = disconnect
@@ -309,12 +306,14 @@ pg.__gc = function(o)
 end
 
 ---@param opts table @{database = "", user = "", password = ""}
----@return pg|pg_error
+---@return pg
 function pg.connect(opts)
     local sock, err = socket.connect(opts.host, opts.port, moon.PTYPE_SOCKET_TCP, opts.connect_timeout)
     if not sock then
         return {code = "SOCKET", message = err}
     end
+
+    socket.settimeout(sock, 10)
 
     local obj = table.deepcopy(opts)
     obj.sock = sock
@@ -329,6 +328,9 @@ function pg.connect(opts)
     end
 
     if not success then
+        if type(err) == "table" then
+            return err
+        end
         return {code = "AUTH", message = err}
     end
 
@@ -338,6 +340,9 @@ function pg.connect(opts)
     end
 
     if not success then
+        if type(err) == "table" then
+            return err
+        end
         return {code = "AUTH", message = err}
     end
 
@@ -479,18 +484,17 @@ local function format_query_result(row_desc, data_rows, command_complete)
 end
 
 function pg.pack_query_buffer(buf)
-    wback(buf, "\0")
-    local len = bsize(buf)
-    wfront(buf, MSG_TYPE.query, strpack(">I", len+4))
+    wfront(buf, MSG_TYPE.query, strpack(">I", bsize(buf)+4+#NULL))
+    wback(buf, NULL)
 end
 
----@param sql message_ptr|string
----@return pg_result|pg_error
+---@param sql buffer_shr_ptr|string
+---@return pg_result
 function pg.query(self, sql)
     if type(sql) == "string" then
         send_message(self, MSG_TYPE.query, {sql, NULL})
     else
-        socket.write_message(self.sock, sql)
+        socket.write(self.sock, sql)
     end
     local row_desc, data_rows, err_msg
     local result, notifications
