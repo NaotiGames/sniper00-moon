@@ -260,5 +260,8 @@
     <ClCompile Include="..\..\..\third\yyjson\yyjson.c">
       <Filter>third\yyjson</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\..\lualib-src\lua_snowflake.cpp">
+      <Filter>lualib-src</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

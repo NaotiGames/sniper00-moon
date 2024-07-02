@@ -78,6 +78,7 @@ OBJECTS := \
 	$(OBJDIR)/lua_schema.o \
 	$(OBJDIR)/lua_serialize.o \
 	$(OBJDIR)/lua_socket.o \
+	$(OBJDIR)/lua_snowflake.o \
 	$(OBJDIR)/lua_uuid.o \
 	$(OBJDIR)/lua_zset.o \
 	$(OBJDIR)/fastlz.o \
@@ -204,6 +205,9 @@ $(OBJDIR)/lua_serialize.o: ../../../lualib-src/lua_serialize.cpp
 	@echo $(notdir $<)
 	$(SILENT) $(CXX) $(ALL_CXXFLAGS) $(FORCE_INCLUDE) -o "$@" -MF "$(@:%.o=%.d)" -c "$<"
 $(OBJDIR)/lua_socket.o: ../../../lualib-src/lua_socket.cpp
+	@echo $(notdir $<)
+	$(SILENT) $(CXX) $(ALL_CXXFLAGS) $(FORCE_INCLUDE) -o "$@" -MF "$(@:%.o=%.d)" -c "$<"
+$(OBJDIR)/lua_snowflake.o: ../../../lualib-src/lua_snowflake.cpp
 	@echo $(notdir $<)
 	$(SILENT) $(CXX) $(ALL_CXXFLAGS) $(FORCE_INCLUDE) -o "$@" -MF "$(@:%.o=%.d)" -c "$<"
 $(OBJDIR)/lua_uuid.o: ../../../lualib-src/lua_uuid.cpp
