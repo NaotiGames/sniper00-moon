@@ -30,7 +30,11 @@ local socket_data_type = {
 ---| 'ping'
 ---| 'pong'
 
-local websocket = {}
+---@class websocket
+---@field write fun(fd:integer, data:string|buffer_ptr|buffer_shr_ptr):boolean send binary data
+local websocket = {
+    write = socket.write,
+}
 
 function websocket.close(fd)
     socket.close(fd)
@@ -63,7 +67,7 @@ function websocket.connect(url, header, timeout)
 
     local response = internal.request("GET", host, {
         path = uri,
-        connect_timeout = timeout,
+        timeout = timeout,
         header = request_header
     })
 
