@@ -32,7 +32,7 @@ namespace moon
             read_header();
         }
 
-        bool send(buffer_shr_ptr_t&& data) override
+        bool send(buffer_shr_ptr_t data) override
         {
             if (data->size() >= MESSAGE_CONTINUED_FLAG && !enum_has_any_bitmask(flag_, enable_chunked::send))
             {
@@ -60,7 +60,8 @@ namespace moon
                 bytes += size;
                 if (!elm->has_bitmask(socket_send_mask::raw)) {
                     wbuffers_.begin_write_slice();
-                    message_size_t slice_size = 0, header = 0;
+                    message_size_t slice_size = 0;
+                    message_size_t header = 0;
                     do
                     {
                         header = slice_size = (size >= MESSAGE_CONTINUED_FLAG) ? MESSAGE_CONTINUED_FLAG : static_cast<message_size_t>(size);
@@ -170,7 +171,7 @@ namespace moon
             read_header();
         }
 
-    protected:
+    private:
         enable_chunked flag_;
         buffer cache_;
         buffer_ptr_t data_;

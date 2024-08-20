@@ -250,7 +250,7 @@ namespace moon
                 });
         }
 
-        void send_response(const std::string& s, bool will_close = false)
+        void send_response(std::string_view s, bool will_close = false)
         {
             auto buf = std::make_shared<buffer>(s.size());
             buf->write_back(s.data(), s.size());
@@ -264,7 +264,7 @@ namespace moon
             T result = 0;
             for (size_t i = 0; i < sizeof(T); ++i)
             {
-                result = (result << 8) | data[i];
+                result = (result << 8) | static_cast<T>(data[i]);
             }
             return result;
         }
@@ -282,7 +282,7 @@ namespace moon
                 return read_payload(2);
             }
 
-            const uint8_t* frame_data = (const uint8_t*)(cache_.data());
+            auto frame_data = (const uint8_t*)(cache_.data());
 
             size_t header_size = 2;
             ws::frame_header fh{};
@@ -438,7 +438,7 @@ namespace moon
             if (fh.mask)
             {
                 // unmask data:
-                uint8_t* d = (uint8_t*)data_->data();
+                auto d = (uint8_t*)data_->data();
                 size_t size = data_->size();
                 for (size_t i = 0; i < size; ++i)
                 {
@@ -451,7 +451,7 @@ namespace moon
                 return error(make_error_code(moon::error::ws_closed), std::string{data_->data(), data_->size()});
             }
 
-            message msg = message{ std::move(data_) };
+            auto msg = message{ std::move(data_) };
             msg.set_type(type_);
 
             switch (fh.op)
@@ -476,7 +476,7 @@ namespace moon
             handle_frame();
         }
 
-        static const ws::mask_key_type randkey()
+        static ws::mask_key_type randkey()
         {
             ws::mask_key_type tmp{};
             char x = 0;
@@ -493,7 +493,7 @@ namespace moon
             return tmp;
         }
 
-        virtual void prepare_send(size_t default_once_send_bytes) override
+        void prepare_send(size_t default_once_send_bytes) override
         {
             size_t bytes = 0;
             size_t queue_size = queue_.size();

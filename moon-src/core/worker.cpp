@@ -148,8 +148,8 @@ namespace moon
                 if (server_->get_state() == state::ready)
                 {
                     auto content = moon::format("_service_exit,name:%s serviceid:%08X", name.data(), id);
-                    auto buf = buffer::make_unique();
-                    buf->write_back(content.data(), content.size());
+                    auto buf = buffer{content.size()};
+                    buf.write_back(content.data(), content.size());
                     server_->broadcast(serviceid, buf, PTYPE_SYSTEM);
                 }
 
@@ -169,7 +169,7 @@ namespace moon
     {
         asio::post(io_ctx_, [this, sender,sessionid] {
             std::string content;
-            for (auto& it : services_)
+            for (const auto& it : services_)
             {
                 if (content.empty())
                     content.append("[");
@@ -255,12 +255,12 @@ namespace moon
                             CONSOLE_DEBUG("Dead service [%08X] recv message from [%08X]: %s.",
                                 receiver,
                                 sender,
-                                moon::hex_string({ msg.data(),msg.size() }).data()
+                                moon::escape_non_printable({ msg.data(),msg.size() }).data()
                             );
                         }else{
                             std::string str = moon::format("Attemp call dead service [%08X]: %s."
                             , receiver
-                            , moon::hex_string({ msg.data(),msg.size() }).data());
+                            , moon::escape_non_printable({ msg.data(),msg.size() }).data());
                             msg.set_sessionid(-msg.sessionid());
                             server_->response(sender, str, msg.sessionid(), PTYPE_ERROR);
                         }

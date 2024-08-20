@@ -1,6 +1,5 @@
 ---@class HttpOptions
----@field public path string
----@field public header? table<string,string>
+---@field public headers? table<string,string>
 ---@field public keepalive? integer @ seconds
 ---@field public timeout? integer @ The timeout is applied from when the request starts connecting until the response body has finished. milliseconds, default 10000
 ---@field public proxy? string @ host:port
@@ -8,10 +7,10 @@
 ---@class HttpRequest
 ---@field method string
 ---@field path string
----@field header table<string,string>
+---@field headers table<string,string>
 ---@field query_string string
 ---@field version string
----@field content string
+---@field body string
 ---@field parse_query fun(request:HttpRequest):table<string,string>
 ---@field parse_form fun(request:HttpRequest):table<string,string>
 
@@ -119,17 +118,17 @@ local http_status_msg = {
 ---@class HttpResponse
 ---@field public version string @ http version
 ---@field public status_code integer @ Integer Code of responded HTTP Status, e.g. 404 or 200. -1 means socket error and content is error message
----@field public header table<string,any> @in lower-case key
----@field public content string @ raw body string
+---@field public headers table<string,any> @in lower-case key
+---@field public body string @ raw body string
 ---@field public json? fun(response:HttpResponse):table @ Returns the json-encoded content of a response, if decode failed return nil and error string. if status_code not 200, return nil
----@field public socket_fd? integer @ socket fd if response.header["connection"]:lower() == "upgrade"
+---@field public socket_fd? integer @ socket fd if response.headers["connection"]:lower() == "upgrade"
 local http_response = {}
 
 http_response.__index = http_response
 
 function http_response.new()
     local o = {}
-    o.header = {}
+    o.headers = {}
     o.status_code = 200
     return setmetatable(o, http_response)
 end
@@ -137,14 +136,14 @@ end
 ---@param field string
 ---@param value string
 function http_response:write_header(field, value)
-    self.header[tostring(field)] = tostring(value)
+    self.headers[tostring(field)] = tostring(value)
 end
 
 ---@param content string
 function http_response:write(content)
-    self.content = content
+    self.body = content
     if content then
-        self.header['Content-Length'] = #content
+        self.headers['Content-Length'] = #content
     end
 end
 
@@ -162,15 +161,15 @@ function http_response:tb()
     cache[#cache + 1] = status_msg
     cache[#cache + 1] = "\r\n"
 
-    for k, v in pairs(self.header) do
+    for k, v in pairs(self.headers) do
         cache[#cache + 1] = k
         cache[#cache + 1] = ": "
         cache[#cache + 1] = v
         cache[#cache + 1] = "\r\n"
     end
     cache[#cache + 1] = "\r\n"
-    if self.content then
-        cache[#cache + 1] = self.content
+    if self.body then
+        cache[#cache + 1] = self.body
     end
     return cache
 end
@@ -233,23 +232,23 @@ local function read_response(fd, method)
     ---@type HttpResponse
     local response, err = c.parse_response(data)
     if err then
-        return { error = "Invalid HTTP response header" }
+        return { error = "Invalid HTTP response headers" }
     end
 
     ---@diagnostic disable-next-line: assign-type-mismatch
     response.status_code = tointeger(string.match(response.status_code, "%d+"))
 
-    local header = response.header
+    local headers = response.headers
 
     if method == "HEAD" then
         return response
     end
 
-    if header["transfer-encoding"] ~= 'chunked' and not header["content-length"] then
-        header["content-length"] = "0"
+    if headers["transfer-encoding"] ~= 'chunked' and not headers["content-length"] then
+        headers["content-length"] = "0"
     end
 
-    local content_length = header["content-length"]
+    local content_length = headers["content-length"]
     if content_length then
         ---@diagnostic disable-next-line: cast-local-type
         content_length = tointeger(content_length)
@@ -263,16 +262,16 @@ local function read_response(fd, method)
             if not data then
                 return { error = err }
             end
-            response.content = data
+            response.body = data
         end
-    elseif header["transfer-encoding"] == 'chunked' then
+    elseif headers["transfer-encoding"] == 'chunked' then
         local chunkdata = read_chunked(fd)
         if chunkdata.error then
             return chunkdata
         end
-        response.content = table.concat(chunkdata)
+        response.body = table.concat(chunkdata)
     else
-        return { error = "Unsupport transfer-encoding:" .. tostring(header["transfer-encoding"]) }
+        return { error = "Unsupport transfer-encoding:" .. tostring(headers["transfer-encoding"]) }
     end
 
     return response
@@ -283,7 +282,7 @@ local function parse_query(request)
 end
 
 local function parse_form(request)
-    return c.parse_query_string(request.content)
+    return c.parse_query_string(request.body)
 end
 
 local function parse_header(data)
@@ -291,7 +290,7 @@ local function parse_header(data)
     ---@type HttpRequest
     local request, err = c.parse_request(data)
     if err then
-        return { protocol_error = "Invalid HTTP request header" }
+        return { protocol_error = "Invalid HTTP request headers" }
     end
 
     if request.method == "HEAD" then
@@ -328,13 +327,13 @@ function M.read_request(fd, prefix_data, opt)
         return request
     end
 
-    local header = request.header
+    local headers = request.headers
 
-    if header["transfer-encoding"] ~= 'chunked' and not header["content-length"] then
-        header["content-length"] = "0"
+    if headers["transfer-encoding"] ~= 'chunked' and not headers["content-length"] then
+        headers["content-length"] = "0"
     end
 
-    local content_length = header["content-length"]
+    local content_length = headers["content-length"]
     if content_length then
         ---@diagnostic disable-next-line: cast-local-type
         content_length = tointeger(content_length)
@@ -343,13 +342,15 @@ function M.read_request(fd, prefix_data, opt)
         end
 
         if content_length == 0 then
-            request.content = ""
+            request.body = ""
             return request
         end
 
         if content_max_len and content_length > content_max_len then
             return {
-                error = string.format("HTTP content length exceeded %d, request length %d", content_max_len, content_length) }
+                error = string.format("HTTP content length exceeded %d, request length %d", content_max_len,
+                    content_length)
+            }
         end
 
         data, err = socket.read(fd, content_length)
@@ -357,15 +358,15 @@ function M.read_request(fd, prefix_data, opt)
             return { error = err, network_error = true }
         end
         --print("Content-Length",content_length)
-        request.content = data
-    elseif header["transfer-encoding"] == 'chunked' then
+        request.body = data
+    elseif headers["transfer-encoding"] == 'chunked' then
         local chunkdata = read_chunked(fd, content_max_len)
         if chunkdata.error then
             return chunkdata
         end
-        request.content = table.concat(chunkdata)
+        request.body = table.concat(chunkdata)
     else
-        return { error = "Unsupport transfer-encoding:" .. header["transfer-encoding"] }
+        return { error = "Unsupport transfer-encoding:" .. headers["transfer-encoding"] }
     end
 
     return request
@@ -394,14 +395,14 @@ local function do_request(baseaddress, options, req, method, protocol)
         if not fd then
             return { error = err }
         end
-        timeout = timeout - math.floor((moon.clock() - start_time)*1000)
+        timeout = timeout - math.floor((moon.clock() - start_time) * 1000)
     end
 
     if not socket.write(fd, buffer.concat(req)) then
         return { error = "CLOSED" }
     end
 
-    socket.settimeout(fd, timeout//1000)
+    socket.settimeout(fd, timeout // 1000)
     local ok, response = pcall(read_response, fd, method)
     socket.settimeout(fd, 0)
 
@@ -423,9 +424,9 @@ local function do_request(baseaddress, options, req, method, protocol)
         return response
     end
 
-    if tostring(response.header["connection"]):lower() == "upgrade" then
+    if tostring(response.headers["connection"]):lower() == "upgrade" then
         response.socket_fd = fd
-    elseif not options.keepalive or response.header["connection"] == "close" or #pool >= max_pool_num then
+    elseif not options.keepalive or response.headers["connection"] == "close" or #pool >= max_pool_num then
         socket.close(fd)
     else
         table.insert(pool, fd)
@@ -435,37 +436,96 @@ end
 
 local function tojson(response)
     if response.status_code ~= 200 then return end
-    return json.decode(response.content)
+    return json.decode(response.body)
 end
 
 local function check_protocol(host)
-	local protocol = host:match("^[Hh][Tt][Tt][Pp][Ss]?://")
-	if protocol then
-		host = string.gsub(host, "^"..protocol, "")
-		protocol = string.lower(protocol)
-		if protocol == "https://" then
-			return "https", host
-		elseif protocol == "http://" then
-			return "http", host
-		else
-			error(string.format("Invalid protocol: %s", protocol))
-		end
-	else
-		return "http", host
-	end
+    local protocol = host:match("^[Hh][Tt][Tt][Pp][Ss]?://")
+    if protocol then
+        host = string.gsub(host, "^" .. protocol, "")
+        protocol = string.lower(protocol)
+        if protocol == "https://" then
+            return "https", host
+        elseif protocol == "http://" then
+            return "http", host
+        else
+            error(string.format("Invalid protocol: %s", protocol))
+        end
+    else
+        return "http", host
+    end
+end
+
+function M.parse_url(url)
+    local protocol_end = url:find("://")
+    local protocol = ""
+    local host = ""
+    local port = ""
+    local path = ""
+    local query_string = ""
+    local host_start, host_end, path_start, query_start
+
+    if protocol_end then
+        protocol = url:sub(1, protocol_end - 1)
+        host_start = protocol_end + 3
+    else
+        host_start = 1
+    end
+
+    host_end = url:find("[:/]", host_start) or #url + 1
+    host = url:sub(host_start, host_end - 1)
+
+    if url:sub(host_end, host_end) == ":" then
+        local port_start = host_end + 1
+        path_start = url:find("/", port_start) or #url + 1
+        port = url:sub(port_start, path_start - 1)
+    else
+        path_start = host_end
+    end
+
+    query_start = url:find("?", path_start) or #url + 1
+    path = url:sub(path_start, query_start - 1)
+    local fragment_start = url:find("#", query_start + 1) or #url + 1
+    query_string = url:sub(query_start + 1, fragment_start - 1)
+
+    local query = {}
+    for key, value in query_string:gmatch("([^&=?]-)=([^&=?]+)") do
+        query[key] = value
+    end
+
+    return {
+        protocol = protocol,
+        host = host,
+        port = port,
+        path = path,
+        query = query,
+        query_string = query_string
+    }
 end
 
 ---@param method string
----@param host string
+---@param str_url string
 ---@param options HttpOptions
 ---@param content? string
 ---@return HttpResponse
-function M.request(method, host, options, content)
-    local protocol
-    protocol, host = check_protocol(host)
+function M.request(method, str_url, options, content)
+    local url = M.parse_url(str_url)
+    local protocol = url.protocol
+    local host = url.host
+    if url.port and url.port ~= "" then
+        host = host .. ":" .. url.port
+    end
+    if protocol ~= "https" and protocol ~= "http" then
+        error(string.format("Invalid protocol: %s", protocol))
+    end
 
-    if not options.path or options.path == "" then
-        options.path = "/"
+    if not url.path or url.path == "" then
+        url.path = "/"
+    end
+
+    if url.query and next(url.query) then
+        url.query_string = c.create_query_string(url.query)
+        url.path = url.path .. "?" .. url.query_string
     end
 
     if protocol == "https" then
@@ -473,24 +533,25 @@ function M.request(method, host, options, content)
     end
 
     if options.proxy then
-        options.path = string.format("%s://%s%s", protocol, host, options.path)
+        url.path = string.format("%s://%s%s", protocol, host, url.path)
     else
         if protocol == "https" then
-            error('Error: The protocol is set to "https", but no HTTP to HTTPS forward proxy has been set. Please set a proxy using the "options.proxy" parameter.')
+            error(
+                'Error: The protocol is set to "https", but no HTTP to HTTPS forward proxy has been set. Please set a proxy using the "options.proxy" parameter.')
         end
     end
 
     local cache = {}
     cache[#cache + 1] = method
     cache[#cache + 1] = " "
-    cache[#cache + 1] = options.path
+    cache[#cache + 1] = url.path
     cache[#cache + 1] = " HTTP/1.1\r\n"
     cache[#cache + 1] = "Host: "
     cache[#cache + 1] = host
     cache[#cache + 1] = "\r\n"
 
-    if options.header then
-        for k, v in pairs(options.header) do
+    if options.headers then
+        for k, v in pairs(options.headers) do
             cache[#cache + 1] = k
             cache[#cache + 1] = ": "
             cache[#cache + 1] = tostring(v)
@@ -499,10 +560,10 @@ function M.request(method, host, options, content)
     end
 
     if content and #content > 0 then
-        options.header = options.header or {}
-        local v = options.header["Content-Length"]
+        options.headers = options.headers or {}
+        local v = options.headers["Content-Length"]
         if not v then
-            v = options.header["Transfer-Encoding"]
+            v = options.headers["Transfer-Encoding"]
             if not v or v ~= "chunked" then
                 cache[#cache + 1] = "Content-Length: "
                 cache[#cache + 1] = tostring(#content)
@@ -522,7 +583,7 @@ function M.request(method, host, options, content)
     cache[#cache + 1] = content
 
     if options.proxy then
-        protocol ,host = check_protocol(options.proxy)
+        protocol, host = check_protocol(options.proxy)
     end
 
     local response = do_request(host, options, cache, method, protocol)

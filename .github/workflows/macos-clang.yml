@@ -10,37 +10,12 @@ jobs:
     runs-on: macos-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           submodules: true
-      - name: Setup premake
-        uses: abel0b/setup-premake@v2.2
-        with:
-          version: "5.0.0-beta1"
       - name: Build
         run: |
-          chmod +x build.sh
+          chmod +x ./build.sh
           ./build.sh
       - name: Test
         run: chmod +x moon && ./moon test/main_test.lua
-      - name: Publish
-        run: |
-          mkdir publish
-          cp -r lualib publish/
-          cp -r service publish/
-          cp -r example publish/
-          cp -r test publish/
-          cp moon publish/
-          tar -zcvf darwin-amd64.tar.gz -C publish .
-      - name: Upload a Build Artifact
-        uses: actions/upload-artifact@v3.1.3
-        with:
-          name: darwin-amd64-${{ github.sha }}
-          path: publish/
-      - name: Release
-        uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
-        with:
-          files: darwin-amd64.tar.gz
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
