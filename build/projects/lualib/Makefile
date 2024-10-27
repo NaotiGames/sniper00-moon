@@ -19,7 +19,7 @@ endif
 # #############################################
 
 RESCOMP = windres
-INCLUDES += -I../../.. -I../../../third -I../../../third/lua -I../../../moon-src -I../../../moon-src/core -I../../../third/mimalloc/include -I../../../third/recastnavigation/Detour/Include -I../../../third/recastnavigation/DetourCrowd/Include -I../../../third/recastnavigation/DetourTileCache/Include -I../../../third/recastnavigation/Recast/Include
+INCLUDES += -I../../../src -I../../../third -I../../../third/lua -I../../../src/moon -I../../../src/moon/core -I../../../third/mimalloc/include -I../../../third/recastnavigation/Detour/Include -I../../../third/recastnavigation/DetourCrowd/Include -I../../../third/recastnavigation/DetourTileCache/Include -I../../../third/recastnavigation/Recast/Include
 FORCE_INCLUDE +=
 ALL_CPPFLAGS += $(CPPFLAGS) -MD -MP $(DEFINES) $(INCLUDES)
 ALL_RESFLAGS += $(RESFLAGS) $(DEFINES) $(INCLUDES)
@@ -102,6 +102,7 @@ GENERATED += $(OBJDIR)/lua_navmesh.o
 GENERATED += $(OBJDIR)/lua_random.o
 GENERATED += $(OBJDIR)/lua_schema.o
 GENERATED += $(OBJDIR)/lua_serialize.o
+GENERATED += $(OBJDIR)/lua_snowflake.o
 GENERATED += $(OBJDIR)/lua_socket.o
 GENERATED += $(OBJDIR)/lua_uuid.o
 GENERATED += $(OBJDIR)/lua_zset.o
@@ -146,6 +147,7 @@ OBJECTS += $(OBJDIR)/lua_navmesh.o
 OBJECTS += $(OBJDIR)/lua_random.o
 OBJECTS += $(OBJDIR)/lua_schema.o
 OBJECTS += $(OBJDIR)/lua_serialize.o
+OBJECTS += $(OBJDIR)/lua_snowflake.o
 OBJECTS += $(OBJDIR)/lua_socket.o
 OBJECTS += $(OBJDIR)/lua_uuid.o
 OBJECTS += $(OBJDIR)/lua_zset.o
@@ -213,49 +215,52 @@ endif
 # File Rules
 # #############################################
 
-$(OBJDIR)/lua_aoi.o: ../../../lualib-src/lua_aoi.cpp
+$(OBJDIR)/lua_aoi.o: ../../../src/lualib-src/lua_aoi.cpp
 	@echo "$(notdir $<)"
 	$(SILENT) $(CXX) $(ALL_CXXFLAGS) $(FORCE_INCLUDE) -o "$@" -MF "$(@:%.o=%.d)" -c "$<"
-$(OBJDIR)/lua_buffer.o: ../../../lualib-src/lua_buffer.cpp
+$(OBJDIR)/lua_buffer.o: ../../../src/lualib-src/lua_buffer.cpp
 	@echo "$(notdir $<)"
 	$(SILENT) $(CXX) $(ALL_CXXFLAGS) $(FORCE_INCLUDE) -o "$@" -MF "$(@:%.o=%.d)" -c "$<"
-$(OBJDIR)/lua_coroutine.o: ../../../lualib-src/lua_coroutine.cpp
+$(OBJDIR)/lua_coroutine.o: ../../../src/lualib-src/lua_coroutine.cpp
 	@echo "$(notdir $<)"
 	$(SILENT) $(CXX) $(ALL_CXXFLAGS) $(FORCE_INCLUDE) -o "$@" -MF "$(@:%.o=%.d)" -c "$<"
-$(OBJDIR)/lua_fs.o: ../../../lualib-src/lua_fs.cpp
+$(OBJDIR)/lua_fs.o: ../../../src/lualib-src/lua_fs.cpp
 	@echo "$(notdir $<)"
 	$(SILENT) $(CXX) $(ALL_CXXFLAGS) $(FORCE_INCLUDE) -o "$@" -MF "$(@:%.o=%.d)" -c "$<"
-$(OBJDIR)/lua_http.o: ../../../lualib-src/lua_http.cpp
+$(OBJDIR)/lua_http.o: ../../../src/lualib-src/lua_http.cpp
 	@echo "$(notdir $<)"
 	$(SILENT) $(CXX) $(ALL_CXXFLAGS) $(FORCE_INCLUDE) -o "$@" -MF "$(@:%.o=%.d)" -c "$<"
-$(OBJDIR)/lua_json.o: ../../../lualib-src/lua_json.cpp
+$(OBJDIR)/lua_json.o: ../../../src/lualib-src/lua_json.cpp
 	@echo "$(notdir $<)"
 	$(SILENT) $(CXX) $(ALL_CXXFLAGS) $(FORCE_INCLUDE) -o "$@" -MF "$(@:%.o=%.d)" -c "$<"
-$(OBJDIR)/lua_kcp.o: ../../../lualib-src/lua_kcp.cpp
+$(OBJDIR)/lua_kcp.o: ../../../src/lualib-src/lua_kcp.cpp
 	@echo "$(notdir $<)"
 	$(SILENT) $(CXX) $(ALL_CXXFLAGS) $(FORCE_INCLUDE) -o "$@" -MF "$(@:%.o=%.d)" -c "$<"
-$(OBJDIR)/lua_moon.o: ../../../lualib-src/lua_moon.cpp
+$(OBJDIR)/lua_moon.o: ../../../src/lualib-src/lua_moon.cpp
 	@echo "$(notdir $<)"
 	$(SILENT) $(CXX) $(ALL_CXXFLAGS) $(FORCE_INCLUDE) -o "$@" -MF "$(@:%.o=%.d)" -c "$<"
-$(OBJDIR)/lua_navmesh.o: ../../../lualib-src/lua_navmesh.cpp
+$(OBJDIR)/lua_navmesh.o: ../../../src/lualib-src/lua_navmesh.cpp
 	@echo "$(notdir $<)"
 	$(SILENT) $(CXX) $(ALL_CXXFLAGS) $(FORCE_INCLUDE) -o "$@" -MF "$(@:%.o=%.d)" -c "$<"
-$(OBJDIR)/lua_random.o: ../../../lualib-src/lua_random.cpp
+$(OBJDIR)/lua_random.o: ../../../src/lualib-src/lua_random.cpp
 	@echo "$(notdir $<)"
 	$(SILENT) $(CXX) $(ALL_CXXFLAGS) $(FORCE_INCLUDE) -o "$@" -MF "$(@:%.o=%.d)" -c "$<"
-$(OBJDIR)/lua_schema.o: ../../../lualib-src/lua_schema.cpp
+$(OBJDIR)/lua_schema.o: ../../../src/lualib-src/lua_schema.cpp
 	@echo "$(notdir $<)"
 	$(SILENT) $(CXX) $(ALL_CXXFLAGS) $(FORCE_INCLUDE) -o "$@" -MF "$(@:%.o=%.d)" -c "$<"
-$(OBJDIR)/lua_serialize.o: ../../../lualib-src/lua_serialize.cpp
+$(OBJDIR)/lua_serialize.o: ../../../src/lualib-src/lua_serialize.cpp
 	@echo "$(notdir $<)"
 	$(SILENT) $(CXX) $(ALL_CXXFLAGS) $(FORCE_INCLUDE) -o "$@" -MF "$(@:%.o=%.d)" -c "$<"
-$(OBJDIR)/lua_socket.o: ../../../lualib-src/lua_socket.cpp
+$(OBJDIR)/lua_snowflake.o: ../../../src/lualib-src/lua_snowflake.cpp
 	@echo "$(notdir $<)"
 	$(SILENT) $(CXX) $(ALL_CXXFLAGS) $(FORCE_INCLUDE) -o "$@" -MF "$(@:%.o=%.d)" -c "$<"
-$(OBJDIR)/lua_uuid.o: ../../../lualib-src/lua_uuid.cpp
+$(OBJDIR)/lua_socket.o: ../../../src/lualib-src/lua_socket.cpp
 	@echo "$(notdir $<)"
 	$(SILENT) $(CXX) $(ALL_CXXFLAGS) $(FORCE_INCLUDE) -o "$@" -MF "$(@:%.o=%.d)" -c "$<"
-$(OBJDIR)/lua_zset.o: ../../../lualib-src/lua_zset.cpp
+$(OBJDIR)/lua_uuid.o: ../../../src/lualib-src/lua_uuid.cpp
+	@echo "$(notdir $<)"
+	$(SILENT) $(CXX) $(ALL_CXXFLAGS) $(FORCE_INCLUDE) -o "$@" -MF "$(@:%.o=%.d)" -c "$<"
+$(OBJDIR)/lua_zset.o: ../../../src/lualib-src/lua_zset.cpp
 	@echo "$(notdir $<)"
 	$(SILENT) $(CXX) $(ALL_CXXFLAGS) $(FORCE_INCLUDE) -o "$@" -MF "$(@:%.o=%.d)" -c "$<"
 $(OBJDIR)/fastlz.o: ../../../third/fastlz/fastlz.c

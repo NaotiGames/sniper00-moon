@@ -1,10 +1,12 @@
----@diagnostic disable: undefined-global
+---@diagnostic disable: undefined-global, undefined-field
 
-os.execute("git pull")
-os.execute("git submodule init")
-os.execute("git submodule update")
+if _ACTION ~= "build" and _ACTION ~= "clean" and _ACTION ~= "publish" then
+    os.execute("git pull")
+    os.execute("git submodule init")
+    os.execute("git submodule update")
+end
 
-local LUA_BUILD_AS_DLL = true
+local LUA_BUILD_AS_SHARED = true
 
 workspace "Server"
     configurations { "Debug", "Release" }
@@ -12,7 +14,9 @@ workspace "Server"
     cppdialect "C++17"
     location "./"
     architecture "x64"
-    staticruntime "on"
+    if not LUA_BUILD_AS_SHARED then
+        staticruntime "on"
+    end
 
     filter "configurations:Debug"
         defines { "DEBUG" }
@@ -29,9 +33,6 @@ workspace "Server"
         warnings "Extra"
         cdialect "C11"
         buildoptions{"/experimental:c11atomics"}
-        if LUA_BUILD_AS_DLL then
-            staticruntime "off"
-        end
 
     filter { "system:linux" }
         warnings "High"
@@ -43,23 +44,25 @@ project "lua"
     location "build/projects/%{prj.name}"
     objdir "build/obj/%{prj.name}/%{cfg.buildcfg}"
     targetdir "build/bin/%{cfg.buildcfg}"
-    kind "StaticLib"
+    if LUA_BUILD_AS_SHARED then
+        kind "SharedLib"
+        postbuildcommands{"{COPY} %{cfg.buildtarget.abspath} %{wks.location}"}
+    else
+        kind "StaticLib"
+    end
     language "C"
     includedirs {"./third/lua"}
     files {"./third/lua/onelua.c"}
     defines {"MAKE_LIB"}
     filter { "system:windows" }
         disablewarnings { "4244","4324","4702","4310", "4701"}
-        if LUA_BUILD_AS_DLL then
-            kind "SharedLib"
+        if LUA_BUILD_AS_SHARED then
             defines {"LUA_BUILD_AS_DLL"}
-            postbuildcommands{"{COPY} %{cfg.buildtarget.abspath} %{wks.location}"}
         end
     filter { "system:linux" }
         defines {"LUA_USE_LINUX"}
     filter { "system:macosx" }
         defines {"LUA_USE_MACOSX"}
-
 
 project "mimalloc"
     location "build/projects/%{prj.name}"
@@ -79,18 +82,18 @@ project "moon"
     kind "ConsoleApp"
     language "C++"
     includedirs {
-        "./",
-        "./moon-src",
-        "./moon-src/core",
+        "./src",
+        "./src/moon",
+        "./src/moon/core",
         "./third",
         "./third/lua",
         "./third/mimalloc/include"
     }
 
     files {
-        "./moon-src/**.h",
-        "./moon-src/**.hpp",
-        "./moon-src/**.cpp"
+        "./src/moon/**.h",
+        "./src/moon/**.hpp",
+        "./src/moon/**.cpp"
     }
 
     links{
@@ -117,7 +120,7 @@ project "moon"
         links{"dl","pthread","stdc++fs"}
         linkoptions {
             "-static-libstdc++ -static-libgcc",
-            "-Wl,-E,--as-needed,-rpath=./"
+            "-Wl,--as-needed,-rpath=./"
         }
     filter {"system:macosx"}
         links{"dl","pthread"}
@@ -153,7 +156,7 @@ local function add_lua_module(dir, name, options )
 
         language "C"
         kind "StaticLib"
-        includedirs {"./", "./third","./third/lua"}
+        includedirs {"./src", "./third","./third/lua"}
         files { dir.."/**.h",dir.."/**.hpp", dir.."/**.c",dir.."/**.cpp"}
 
         defines{"SOL_ALL_SAFETIES_ON"}
@@ -218,12 +221,12 @@ add_lua_module(
 )
 
 add_lua_module(
-    "./lualib-src",
+    "./src/lualib-src",
     "lualib",
     {
         all = function()
             language "C++"
-            includedirs {"./moon-src", "./moon-src/core", "./third/mimalloc/include"}
+            includedirs {"./src/moon", "./src/moon/core", "./third/mimalloc/include"}
             defines {
                 "ASIO_STANDALONE" ,
                 "ASIO_NO_DEPRECATED",
@@ -273,6 +276,32 @@ local function string_trim(input, chars)
     return string.gsub(input, pattern, "")
 end
 
+local function cleanup()
+    os.remove("moon")
+    os.remove("moon.exe")
+    os.remove("moon.debug")
+    os.remove("lua.dll")
+    os.remove("liblua.so")
+    os.remove("liblua.so.debug")
+    os.remove("liblua.dylib")
+    os.rmdir("build/obj")
+    os.rmdir("build/bin")
+    os.rmdir(".vs")
+end
+
+-- if _ACTION == "clean" then
+--     cleanup()
+-- end
+
+newaction {
+    trigger = "clean",
+    description = "Cleanup",
+    execute = function ()
+        cleanup()
+    end
+}
+
+
 newaction {
     trigger = "build",
     description = "Build",
@@ -280,33 +309,72 @@ newaction {
         local host = os.host()
         local switch = {
             windows = function ()
-                os.execute("premake5.exe clean")
                 os.execute("premake5.exe vs2022")
                 local command = os.getenv("ProgramFiles(x86)")..[[\Microsoft Visual Studio\Installer\vswhere.exe]]
                 command = string.format('"%s" %s', string_trim(command), " -latest -products * -requires Microsoft.Component.MSBuild -property installationPath")
                 local handle = assert(io.popen(command))
                 command = handle:read("*a")
                 handle:close()
-                os.execute(string.format('"%s%s" -maxcpucount:4 Server.sln /t:rebuild /p:Configuration=Release ', string_trim(command), [[\MSBuild\Current\Bin\MSBuild.exe]]))
+                os.execute(string.format('"%s%s" -maxcpucount:4 Server.sln /t:build /p:Configuration=Release ', string_trim(command), [[\MSBuild\Current\Bin\MSBuild.exe]]))
             end,
             linux = function ()
-                os.execute("premake5 clean")
                 os.execute("premake5 gmake2")
                 os.execute("make -j4 config=release")
+                os.execute([[
+                    #!/bin/bash
+                    if objdump --section-headers "moon" | grep -q ".debug_info"; then
+                        objcopy --only-keep-debug moon moon.debug
+                        objcopy --only-keep-debug liblua.so liblua.so.debug
+                        strip moon
+                        strip liblua.so
+                        objcopy --add-gnu-debuglink=moon.debug moon
+                        objcopy --add-gnu-debuglink=liblua.so.debug liblua.so
+                    fi
+                ]])
             end,
             macosx = function ()
-                os.execute("premake5 clean")
                 os.execute("premake5 gmake2 --cc=clang")
                 os.execute("make -j4 config=release")
+            end,
+        }
+
+        -- cleanup()
+        switch[host]()
+    end
+}
+
+newaction {
+    trigger = "publish",
+    description = "Publish",
+    execute = function ()
+        local host = os.host()
+        local switch = {
+            windows = function ()
+                os.execute("if exist moon-windows.zip del /f moon-windows.zip")
+                os.execute("if not exist clib mkdir clib")
+                os.execute("echo Compressing files into moon-windows.zip...")
+                os.execute("powershell Compress-Archive -Path moon.exe, lua.dll, lualib, service, clib -DestinationPath moon-windows.zip")
+                os.execute("echo Checking if moon-windows.zip was created...")
+                os.execute("if exist moon-windows.zip (echo moon-windows.zip created successfully.) else (echo Failed to create moon-windows.zip.)")
+            end,
+            linux = function ()
+                os.execute([[
+                    #!/bin/bash
+                    rm -f moon-linux.zip
+                    mkdir -p clib
+                    zip -r moon-linux.zip moon liblua.so lualib service clib/*.so moon.debug liblua.so.debug
+                ]])
+            end,
+            macosx = function ()
+                os.execute([[
+                    #!/bin/bash
+                    rm -f moon-linux.zip
+                    mkdir -p clib
+                    zip -r moon-linux.zip moon liblua.dylib lualib service clib/*.dylib
+                ]])
             end,
         }
 
         switch[host]()
     end
 }
-
-if _ACTION == "clean" then
-    os.rmdir("build/obj")
-    os.rmdir("build/bin")
-    os.rmdir(".vs")
-end
