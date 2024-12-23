@@ -132,7 +132,7 @@
     <ClCompile Include="..\..\..\src\lualib-src\lua_random.cpp" />
     <ClCompile Include="..\..\..\src\lualib-src\lua_schema.cpp" />
     <ClCompile Include="..\..\..\src\lualib-src\lua_serialize.cpp" />
-	<ClCompile Include="..\..\..\src\lualib-src\lua_snowflake.cpp" />
+    <ClCompile Include="..\..\..\src\lualib-src\lua_snowflake.cpp" />
     <ClCompile Include="..\..\..\src\lualib-src\lua_socket.cpp" />
     <ClCompile Include="..\..\..\src\lualib-src\lua_uuid.cpp" />
     <ClCompile Include="..\..\..\src\lualib-src\lua_zset.cpp" />
