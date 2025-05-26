@@ -151,7 +151,7 @@ static int lnext(lua_State* L)
     }
 
     char s[64];
-    sprintf(s, "%" PRIu64, id);
+    sprintf_s(s, "%" PRIu64, id);
     lua_pushstring(L, s);
     return 1;
 }
