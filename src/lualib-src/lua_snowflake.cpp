@@ -4,6 +4,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <thread>
+#include <memory>
 #include <inttypes.h>
 
 
@@ -151,7 +152,11 @@ static int lnext(lua_State* L)
     }
 
     char s[64];
-    sprintf_s(s, "%" PRIu64, id);
+    #if defined(_WIN32)
+    sprintf_s(s, sizeof(s), "%" PRIu64, id);
+	#else
+    snprintf(s, sizeof(s), "%" PRIu64, id);
+	#endif
     lua_pushstring(L, s);
     return 1;
 }
