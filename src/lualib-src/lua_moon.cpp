@@ -21,7 +21,7 @@ static moon::buffer_ptr_t moon_to_buffer(lua_State* L, int index) {
             std::size_t len;
             auto str = lua_tolstring(L, index, &len);
             auto buf = moon::buffer::make_unique(len);
-            buf->write_back(str, len);
+            buf->write_back({ str, len });
             return buf;
         }
         case LUA_TLIGHTUSERDATA: {
@@ -42,7 +42,7 @@ static moon::buffer_shr_ptr_t moon_to_shr_buffer(lua_State* L, int index) {
             std::size_t len;
             auto str = lua_tolstring(L, index, &len);
             auto buf = buffer::make_shared(len);
-            buf->write_back(str, len);
+            buf->write_back({ str, len });
             return buf;
         }
         case LUA_TLIGHTUSERDATA: {
@@ -92,7 +92,7 @@ static int lmoon_timeout(lua_State* L) {
     lua_service* S = lua_service::get(L);
     int64_t interval = luaL_checkinteger(L, 1);
     int64_t timer_id = S->next_sequence();
-    S->get_server()->timeout(interval, S->id(), -timer_id);
+    S->get_server()->timeout(interval, S->id(), timer_id);
     lua_pushinteger(L, timer_id);
     return 1;
 }
@@ -108,10 +108,10 @@ static int lmoon_log(lua_State* L) {
     int n = lua_gettop(L); /* number of arguments */
     for (int i = 2; i <= n; i++) { /* for each argument */
         if (i > 2) /* not the first element? */
-            line.write_back("    ", 4); /* add a tab before it */
+            line.write_back({ "    ", 4 }); /* add a tab before it */
         switch (lua_type(L, i)) {
             case LUA_TNIL:
-                line.write_back("nil", 3);
+                line.write_back({ "nil", 3 });
                 break;
             case LUA_TNUMBER: {
                 if (lua_isinteger(L, i))
@@ -123,27 +123,27 @@ static int lmoon_log(lua_State* L) {
             case LUA_TBOOLEAN: {
                 int v = lua_toboolean(L, i);
                 constexpr std::string_view s[2] = { "false", "true" };
-                line.write_back(s[v].data(), s[v].size());
+                line.write_back(s[v]);
                 break;
             }
             case LUA_TSTRING: {
                 size_t sz = 0;
                 const char* str = lua_tolstring(L, i, &sz);
-                line.write_back(str, sz);
+                line.write_back({ str, sz });
                 break;
             }
             default:
                 size_t l;
                 const char* s = luaL_tolstring(L, i, &l); /* convert it to string */
-        line.write_back(s, l); /* print it */
-        lua_pop(L, 1); /* pop result */
-    }
+                line.write_back({ s, l }); /* print it */
+                lua_pop(L, 1); /* pop result */
+        }
     }
 
     if (lua_Debug ar; lua_getstack(L, 2, &ar) && lua_getinfo(L, "Sl", &ar)) {
-        line.write_back("    (", 5);
+        line.write_back({ "    (", 5 });
         if (ar.srclen > 1)
-            line.write_back(ar.source + 1, ar.srclen - 1);
+            line.write_back({ ar.source + 1, ar.srclen - 1 });
         line.write_back(':');
         line.write_chars(ar.currentline);
         line.write_back(')');
@@ -176,7 +176,9 @@ static int lmoon_send(lua_State* L) {
 
     int64_t session = luaL_opt(L, luaL_checkinteger, 4, S->next_sequence());
 
-    S->get_server()->send(S->id(), receiver, moon_to_buffer(L, 3), session, type);
+    auto sender = (uint32_t)luaL_opt(L, luaL_checkinteger, 5, S->id());
+
+    S->get_server()->send(sender, receiver, moon_to_buffer(L, 3), session, type);
 
     lua_pushinteger(L, session);
     lua_pushinteger(L, receiver);
@@ -294,7 +296,10 @@ static int lmoon_scan_services(lua_State* L) {
     lua_service* S = lua_service::get(L);
     auto workerid = (uint32_t)luaL_checkinteger(L, 1);
     int64_t sessionid = S->next_sequence();
-    S->get_server()->scan_services(S->id(), workerid, sessionid);
+    if (!S->get_server()->scan_services(S->id(), workerid, sessionid)) {
+        lua_pushfstring(L, "worker '%u' not found", workerid);
+        return lua_error(L);
+    }
     lua_pushinteger(L, sessionid);
     return 1;
 }
@@ -375,13 +380,13 @@ static int message_decode(lua_State* L) {
     for (size_t i = 0; i < len; ++i) {
         switch (sz[i]) {
             case 'S':
-                lua_pushinteger(L, m->sender());
+                lua_pushinteger(L, m->sender);
                 break;
             case 'R':
-                lua_pushinteger(L, m->receiver());
+                lua_pushinteger(L, m->receiver);
                 break;
             case 'E':
-                lua_pushinteger(L, m->sessionid());
+                lua_pushinteger(L, m->session);
                 break;
             case 'Z':
                 if (m->data() != nullptr)
@@ -403,13 +408,12 @@ static int message_decode(lua_State* L) {
                 break;
             }
             case 'C': {
-                if (buffer* buf = m->as_buffer(); nullptr == buf) {
-                    lua_pushlightuserdata(L, nullptr);
-                    lua_pushinteger(L, 0);
+                if (m->is_bytes()) {
+                    lua_pushlightuserdata(L, (void*)m->data());
                 } else {
-                    lua_pushlightuserdata(L, buf->data());
-                    lua_pushinteger(L, buf->size());
+                    lua_pushinteger(L, m->as_ptr());
                 }
+                lua_pushinteger(L, m->size());
                 break;
             }
             default:
@@ -424,11 +428,12 @@ static int message_redirect(lua_State* L) {
     auto* m = (message*)lua_touserdata(L, 1);
     if (nullptr == m)
         return luaL_argerror(L, 1, "lightuserdata(message*) expected");
-    m->set_receiver((uint32_t)luaL_checkinteger(L, 2));
-    m->set_type((uint8_t)luaL_checkinteger(L, 3));
+    if (m->receiver = (uint32_t)luaL_checkinteger(L, 2); m->receiver == 0)
+        return luaL_argerror(L, 2, "receiver must > 0");
+    m->type = (uint8_t)luaL_checkinteger(L, 3);
     if (top > 3) {
-        m->set_sender((uint32_t)luaL_checkinteger(L, 4));
-        m->set_sessionid(luaL_checkinteger(L, 5));
+        m->sender = (uint32_t)luaL_checkinteger(L, 4);
+        m->session = luaL_checkinteger(L, 5);
     }
     return 0;
 }
@@ -447,6 +452,16 @@ static int escape_print(lua_State* L) {
     auto res = moon::escape_print(s);
     lua_pushlstring(L, res.data(), res.size());
     return 1;
+}
+
+static int moon_signal(lua_State* L) {
+    auto S = lua_service::get(L);
+    auto wid = static_cast<uint32_t>(luaL_checkinteger(L, 1));
+    auto val = static_cast<uint32_t>(luaL_checkinteger(L, 2));
+    if (auto w = S->get_server()->get_worker(wid); w != nullptr) {
+        w->signal(val);
+    }
+    return 0;
 }
 
 extern "C" {
@@ -473,7 +488,8 @@ int LUAMOD_API luaopen_moon_core(lua_State* L) {
                      { "decode", message_decode },
                      { "redirect", message_redirect },
                      { "collect", lmi_collect },
-                     { "escape_print", escape_print},
+                     { "escape_print", escape_print },
+                     { "signal", moon_signal },
                      /* placeholders */
                      { "id", NULL },
                      { "name", NULL },
@@ -758,26 +774,28 @@ static int lasio_unpack_udp(lua_State* L) {
 
 extern "C" {
 int LUAMOD_API luaopen_asio_core(lua_State* L) {
-    luaL_Reg l[] = { { "try_open", lasio_try_open },
-                     { "listen", lasio_listen },
-                     { "accept", lasio_accept },
-                     { "connect", lasio_connect },
-                     { "read", lasio_read },
-                     { "write", lasio_write },
-                     { "write_message", lasio_write_message },
-                     { "close", lasio_close },
-                     { "switch_type", lasio_switch_type },
-                     { "settimeout", lasio_settimeout },
-                     { "setnodelay", lasio_setnodelay },
-                     { "set_enable_chunked", lasio_set_enable_chunked },
-                     { "set_send_queue_limit", lasio_set_send_queue_limit },
-                     { "getaddress", lasio_address },
-                     { "udp", lasio_udp },
-                     { "udp_connect", lasio_udp_connect },
-                     { "sendto", lasio_sendto },
-                     { "make_endpoint", lasio_make_endpoint },
-                     { "unpack_udp", lasio_unpack_udp },
-                     { NULL, NULL } };
+    luaL_Reg l[] = {
+        { "try_open", lasio_try_open },
+        { "listen", lasio_listen },
+        { "accept", lasio_accept },
+        { "connect", lasio_connect },
+        { "read", lasio_read },
+        { "write", lasio_write },
+        { "write_message", lasio_write_message },
+        { "close", lasio_close },
+        { "switch_type", lasio_switch_type },
+        { "settimeout", lasio_settimeout },
+        { "setnodelay", lasio_setnodelay },
+        { "set_enable_chunked", lasio_set_enable_chunked },
+        { "set_send_queue_limit", lasio_set_send_queue_limit },
+        { "getaddress", lasio_address },
+        { "udp", lasio_udp },
+        { "udp_connect", lasio_udp_connect },
+        { "sendto", lasio_sendto },
+        { "make_endpoint", lasio_make_endpoint },
+        { "unpack_udp", lasio_unpack_udp },
+        { NULL, NULL },
+    };
     luaL_newlib(L, l);
     return 1;
 }

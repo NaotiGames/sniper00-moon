@@ -69,7 +69,8 @@ static void register_signal(int argc, char* argv[]) {
         }
         str.append(" ");
     }
-    SetConsoleTitle(str.data());
+    SetConsoleTitleA(str.data());
+    SetConsoleOutputCP(CP_UTF8);
 #else
     std::signal(SIGHUP, SIG_IGN);
     std::signal(SIGQUIT, SIG_IGN);
@@ -197,7 +198,7 @@ int main(int argc, char* argv[]) {
             MOON_CHECK(fs::exists(search_path / "lualib"), "can not find moon lualib path.");
             auto strpath = search_path.string();
             moon::replace(strpath, "\\", "/");
-            if(!lua_search_path.empty() && lua_search_path.back() != ';')
+            if (!lua_search_path.empty() && lua_search_path.back() != ';')
                 lua_search_path.append(";");
             lua_search_path.append(
                 moon::format("%s/lualib/?.lua;%s/service/?.lua;", strpath.data(), strpath.data())
@@ -286,18 +287,22 @@ int main(int argc, char* argv[]) {
 }
 
 extern "C" {
-static void
+void MOON_EXPORT
 send_message(uint8_t type, uint32_t receiver, int64_t session, const char* data, size_t len) {
     auto svr = wk_server.lock();
     if (nullptr == svr)
         return;
-    moon::message msg(len);
-    msg.set_type(type);
-    msg.set_receiver(receiver);
-    msg.set_sessionid(session);
-    msg.write_data(std::string_view(data, len));
-    svr->send_message(std::move(msg));
+    svr->send_message(moon::message { type, 0, receiver, session, std::string_view(data, len) });
 }
+
+void MOON_EXPORT
+send_integer_message(uint8_t type, uint32_t receiver, int64_t session, ssize_t val) {
+    auto svr = wk_server.lock();
+    if (nullptr == svr)
+        return;
+    svr->send_message(moon::message { type, 0, receiver, session, val });
+}
+
 }
 
 #define REGISTER_CUSTOM_LIBRARY(name, lua_c_fn) \
@@ -310,10 +315,6 @@ void open_custom_libs(lua_State* L) {
 #ifdef LUA_CACHELIB
     REGISTER_CUSTOM_LIBRARY("codecache", luaopen_cache);
 #endif
-    //Save the function pointer for the lua dynamic extension library to send messages to the message queue of the moon
-    lua_pushlightuserdata(L, (void*)send_message);
-    lua_setglobal(L, "send_message");
-
     //core
     REGISTER_CUSTOM_LIBRARY("moon.core", luaopen_moon_core);
     REGISTER_CUSTOM_LIBRARY("asio.core", luaopen_asio_core);
@@ -341,5 +342,6 @@ void open_custom_libs(lua_State* L) {
     REGISTER_CUSTOM_LIBRARY("snowflake", luaopen_snowflake);
     REGISTER_CUSTOM_LIBRARY("schema", luaopen_schema);
     REGISTER_CUSTOM_LIBRARY("fmt", luaopen_fmt);
+    REGISTER_CUSTOM_LIBRARY("crypto.scram", luaopen_crypto_scram);
 }
 }

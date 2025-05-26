@@ -6,46 +6,46 @@ require("base.math")
 require("base.util")
 require("base.class")
 
-local core = require("moon.core")
-local seri = require("seri")
+local core             = require("moon.core")
+local seri             = require("seri")
 
-local pairs = pairs
-local type = type
-local error = error
-local tremove = table.remove
-local traceback = debug.traceback
+local pairs            = pairs
+local type             = type
+local error            = error
+local tremove          = table.remove
+local traceback        = debug.traceback
 
-local co_create = coroutine.create
-local co_running = coroutine.running
-local co_yield = coroutine.yield
-local co_resume = coroutine.resume
-local co_close = coroutine.close
+local co_create        = coroutine.create
+local co_running       = coroutine.running
+local co_yield         = coroutine.yield
+local co_resume        = coroutine.resume
+local co_close         = coroutine.close
 
-local _send = core.send
-local _now = core.now
-local _addr = core.id
-local _timeout = core.timeout
-local _newservice = core.new_service
-local _queryservice = core.queryservice
-local _decode = core.decode
-local _scan_services = core.scan_services
+local _send            = core.send
+local _now             = core.now
+local _addr            = core.id
+local _timeout         = core.timeout
+local _newservice      = core.new_service
+local _queryservice    = core.queryservice
+local _decode          = core.decode
+local _scan_services   = core.scan_services
 
 ---@class moon : core
-local moon = core
+local moon             = core
 
-moon.PTYPE_SYSTEM = 1
-moon.PTYPE_TEXT = 2
-moon.PTYPE_LUA = 3
-moon.PTYPE_ERROR = 4
-moon.PTYPE_DEBUG = 5
-moon.PTYPE_SHUTDOWN = 6
-moon.PTYPE_TIMER = 7
-moon.PTYPE_SOCKET_TCP = 8
-moon.PTYPE_SOCKET_UDP = 9
-moon.PTYPE_SOCKET_WS = 10
+moon.PTYPE_SYSTEM      = 1
+moon.PTYPE_TEXT        = 2
+moon.PTYPE_LUA         = 3
+moon.PTYPE_ERROR       = 4
+moon.PTYPE_DEBUG       = 5
+moon.PTYPE_SHUTDOWN    = 6
+moon.PTYPE_TIMER       = 7
+moon.PTYPE_SOCKET_TCP  = 8
+moon.PTYPE_SOCKET_UDP  = 9
+moon.PTYPE_SOCKET_WS   = 10
 moon.PTYPE_SOCKET_MOON = 11
-moon.PTYPE_INTEGER = 12
-moon.PTYPE_LOG = 13
+moon.PTYPE_INTEGER     = 12
+moon.PTYPE_LOG         = 13
 
 --moon.codecache = require("codecache")
 
@@ -53,25 +53,25 @@ moon.PTYPE_LOG = 13
 -- LOG_WARN = 2
 -- LOG_INFO = 3
 -- LOG_DEBUG = 4
-moon.DEBUG = function()
+moon.DEBUG             = function()
     return core.loglevel() == 4 -- LOG_DEBUG
 end
-moon.error = function(...) core.log(1, ...) end
-moon.warn = function(...) core.log(2, ...) end
-moon.info = function(...) core.log(3, ...) end
-moon.debug = function(...) core.log(4, ...) end
+moon.error             = function(...) core.log(1, ...) end
+moon.warn              = function(...) core.log(2, ...) end
+moon.info              = function(...) core.log(3, ...) end
+moon.debug             = function(...) core.log(4, ...) end
 
-moon.pack = seri.pack
-moon.unpack = seri.unpack
+moon.pack              = seri.pack
+moon.unpack            = seri.unpack
 
 --export global variable
-local _g = _G
+local _g               = _G
 
 ---rewrite lua print
-_g["print"] = moon.info
+_g["print"]            = moon.info
 
 --- Sets a Lua global variable. It is not recommended to use this unless necessary.
-moon.exports = {}
+moon.exports           = {}
 setmetatable(
     moon.exports,
     {
@@ -132,7 +132,8 @@ end
 --- @param receiver integer @ The service ID of the receiver.
 --- @param data? string|buffer_ptr @ The message content.
 --- @param session? integer @ The session ID.
-function moon.raw_send(PTYPE, receiver, data, session)
+--- @param sender? integer @ The dummy sender's service ID.
+function moon.raw_send(PTYPE, receiver, data, session, sender)
     local p = protocol[PTYPE]
     if not p then
         error(string.format("moon send unknown PTYPE[%s] message", PTYPE))
@@ -140,7 +141,7 @@ function moon.raw_send(PTYPE, receiver, data, session)
 
     session = session or 0
 
-    return _send(p.PTYPE, receiver, data, session)
+    return _send(p.PTYPE, receiver, data, session, sender)
 end
 
 ---@class service_params
@@ -256,7 +257,7 @@ end
 --- moon.async(bar, 3, 4)
 --- ```
 ---
----@param fn fun(...) @The function to be executed asynchronously
+---@param fn async fun(...) @The function to be executed asynchronously
 ---@param ... any @Optional parameters, passed to the `fn` function
 ---@return thread @The newly created coroutine
 function moon.async(fn, ...)
@@ -383,8 +384,8 @@ local function _dispatch(PTYPE, sender, session, sz, len, m)
     if session > 0 then
         session_watcher[session] = nil
         local co = session_id_coroutine[session]
+        session_id_coroutine[session] = nil
         if co then
-            session_id_coroutine[session] = nil
             --print(coroutine.status(co))
             coresume(co, sz, len, PTYPE)
             --print(coroutine.status(co))
@@ -476,8 +477,8 @@ reg_protocol {
     pack = function(...)
         return ...
     end,
-    unpack = function(sz, len)
-        return math.tointeger(moon.tostring(sz, len))
+    unpack = function(nval)
+        return nval
     end,
     dispatch = function()
         error("PTYPE_TEXT dispatch not implemented")
@@ -607,8 +608,8 @@ reg_protocol {
     name = "timer",
     PTYPE = moon.PTYPE_TIMER,
     israw = true,
-    dispatch = function(msg)
-        local timerid = -_decode(msg, "E")
+    dispatch = function(m)
+        local timerid = _decode(m, "C")
         local v = timer_routine[timerid]
         timer_routine[timerid] = nil
         local trace = timer_profile_trace[timerid]

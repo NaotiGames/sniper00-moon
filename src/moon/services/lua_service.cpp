@@ -194,10 +194,14 @@ void lua_service::dispatch(message* m) {
         int trace = 1;
         lua_pushvalue(L, 2);
 
-        lua_pushinteger(L, m->type());
-        lua_pushinteger(L, m->sender());
-        lua_pushinteger(L, m->sessionid());
-        lua_pushlightuserdata(L, (void*)m->data());
+        lua_pushinteger(L, m->type);
+        lua_pushinteger(L, m->sender);
+        lua_pushinteger(L, m->session);
+        if (m->is_bytes()) {
+            lua_pushlightuserdata(L, (void*)m->data());
+        } else {
+            lua_pushinteger(L, m->as_ptr());
+        }
         lua_pushinteger(L, m->size());
         lua_pushlightuserdata(L, m);
 
@@ -222,16 +226,43 @@ void lua_service::dispatch(message* m) {
 
         lua_pop(L, 1);
 
-        if (m->sessionid() >= 0) {
+        if (m->session >= 0) {
             log::instance().logstring(true, moon::LogLevel::Error, error, id());
         } else {
-            m->set_sessionid(-m->sessionid());
-            server_->response(m->sender(), error, m->sessionid(), PTYPE_ERROR);
+            m->session = -m->session;
+            server_->response(m->sender, error, m->session, PTYPE_ERROR);
         }
     } catch (const std::exception& e) {
         luaL_traceback(L, L, e.what(), 1);
         const char* trace = lua_tostring(L, -1);
         CONSOLE_ERROR("dispatch:\n%s", (trace != nullptr) ? trace : "");
         lua_pop(L, 1);
+    }
+}
+
+void lua_service::signal(int val) {
+    void signal_hook(lua_State * L, lua_Debug*);
+    log::instance()
+        .logstring(true, moon::LogLevel::Info, moon::format("recv a signal %d", val), id());
+
+    if (val == 0) {
+        if (trap.load(std::memory_order_acquire) == 0) {
+            // only one thread can set trap ( trap 0->1 )
+            int32_t expect = 0;
+            if (!trap.compare_exchange_strong(expect, 1, std::memory_order_acq_rel)) {
+                return;
+            }
+            lua_sethook(activeL, signal_hook, LUA_MASKCOUNT, 1);
+            // finish set ( l->trap 1 -> -1 )
+            expect = 1;
+            trap.compare_exchange_strong(expect, -1, std::memory_order_acq_rel);
+        }
+    } else if (val == 1) {
+        log::instance().logstring(
+            true,
+            moon::LogLevel::Info,
+            moon::format("Current Memory %.3fK", (float)mem / 1024),
+            id()
+        );
     }
 }

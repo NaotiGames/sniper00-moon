@@ -37,10 +37,9 @@ void worker::run() {
 
 void worker::stop() {
     asio::post(io_ctx_, [this] {
-        message msg = message::with_empty();
-        msg.set_type(PTYPE_SHUTDOWN);
+        message m = message{PTYPE_SHUTDOWN, 0, 0, 0};
         for (auto& it: services_) {
-            it.second->dispatch(&msg);
+            it.second->dispatch(&m);
         }
     });
 }
@@ -49,6 +48,13 @@ void worker::wait() {
     io_ctx_.stop();
     if (thread_.joinable()) {
         thread_.join();
+    }
+}
+
+void worker::signal(int val) {
+    if(auto s = current_.load(std::memory_order_acquire);s != nullptr)
+    {
+        s->signal(val);
     }
 }
 
@@ -104,12 +110,9 @@ void worker::new_service(std::unique_ptr<service_conf> conf) {
             services_.emplace(serviceid, std::move(s));
 
             if (0 != conf->session) {
-                server_->response(
-                    conf->creator,
-                    std::to_string(serviceid),
-                    conf->session,
-                    PTYPE_INTEGER
-                );
+                server_->send_message(message{
+                    PTYPE_INTEGER, 0, conf->creator, conf->session, serviceid
+                });
             }
             return;
         } while (false);
@@ -120,7 +123,9 @@ void worker::new_service(std::unique_ptr<service_conf> conf) {
         }
 
         if (0 != conf->session) {
-            server_->response(conf->creator, "0"sv, conf->session, PTYPE_INTEGER);
+            server_->send_message(message{
+                PTYPE_INTEGER, 0, conf->creator, conf->session, 0
+            });
         }
     });
 }
@@ -140,7 +145,7 @@ void worker::remove_service(uint32_t serviceid, uint32_t sender, int64_t session
                 auto content =
                     moon::format("_service_exit,name:%s serviceid:%08X", name.data(), id);
                 auto buf = buffer { content.size() };
-                buf.write_back(content.data(), content.size());
+                buf.write_back(content);
                 server_->broadcast(serviceid, buf, PTYPE_SYSTEM);
             }
 
@@ -183,16 +188,18 @@ asio::io_context& worker::io_context() {
 }
 
 void worker::send(message&& msg) {
-    mqsize_.fetch_add(1, std::memory_order_relaxed);
     if (mq_.push_back(std::move(msg)) == 1) {
         asio::post(io_ctx_, [this]() {
             if (auto& read_queue = mq_.swap_on_read(); !read_queue.empty()) {
+                auto size = read_queue.size();
+                swapped_size_.store(size, std::memory_order_relaxed);
                 service* s = nullptr;
                 for (auto& m: read_queue) {
                     s = handle_one(s, std::move(m));
-                    mqsize_.fetch_sub(1, std::memory_order_acq_rel);
+                    swapped_size_.store(--size, std::memory_order_relaxed);
                 }
                 read_queue.clear();
+                current_.store(nullptr, std::memory_order_relaxed);
             }
         });
     }
@@ -219,16 +226,16 @@ bool worker::shared() const {
 }
 
 service* worker::handle_one(service* s, message&& msg) {
-    uint32_t sender = msg.sender();
-    uint32_t receiver = msg.receiver();
-    uint8_t type = msg.type();
+    uint32_t sender = msg.sender;
+    uint32_t receiver = msg.receiver;
+    uint8_t type = msg.type;
 
     if (receiver > 0) {
         if (nullptr == s || s->id() != receiver) {
             s = find_service(receiver);
             if (nullptr == s || !s->ok()) {
-                if (sender != 0 && msg.type() != PTYPE_TIMER) {
-                    if (msg.sessionid() >= 0) {
+                if (sender != 0 && msg.type != PTYPE_TIMER) {
+                    if (msg.session >= 0) {
                         CONSOLE_DEBUG(
                             "Dead service [%08X] recv message from [%08X]: %s.",
                             receiver,
@@ -241,8 +248,8 @@ service* worker::handle_one(service* s, message&& msg) {
                             receiver,
                             moon::escape_print({ msg.data(), msg.size() }).data()
                         );
-                        msg.set_sessionid(-msg.sessionid());
-                        server_->response(sender, str, msg.sessionid(), PTYPE_ERROR);
+                        msg.session = -msg.session;
+                        server_->response(sender, str, msg.session, PTYPE_ERROR);
                     }
                 }
                 return nullptr;
@@ -250,6 +257,7 @@ service* worker::handle_one(service* s, message&& msg) {
         }
 
         double start_time = moon::time::clock();
+        current_.store(s, std::memory_order_release);
         handle_message(s, std::move(msg));
         double diff_time = moon::time::clock() - start_time;
         s->add_cpu(diff_time);
@@ -273,6 +281,7 @@ service* worker::handle_one(service* s, message&& msg) {
         }
 
         if (it.second->ok() && it.second->id() != sender) {
+            current_.store(it.second.get(), std::memory_order_release);
             handle_message(it.second, msg);
         }
     }

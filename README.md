@@ -48,7 +48,7 @@ Moon is a lightweight game server framework based on the actor model. One worker
 
 # Documents
   
-  https://github.com/sniper00/moon/wiki
+  [Doc](https://homrua.com/docs/intro)
 
 
 # Quick Start
@@ -77,16 +77,33 @@ Moon is a lightweight game server framework based on the actor model. One worker
 
 1. Make sure your compiler(vs2022 17.5+, gcc 9.3+, clang 9.0+) support C++17 or [Install `C++17` Compiler.](https://github.com/sniper00/moon/wiki/Build#%E5%AE%89%E8%A3%85c17%E7%BC%96%E8%AF%91%E5%99%A8)。
 
+2. Install **premake5** and ensure that the **premake5** executable location is included in your system path.
+
+      > Download link: https://premake.github.io/download  
+      > On Mac, you can install it using `brew install premake`
+
 2. Clone source code 
 
-```
-    git clone https://github.com/sniper00/moon.git
-``` 
+    ```shell
+      git clone https://github.com/sniper00/moon.git
+    ``` 
 
 3. Build
-    - **windows** run `build.bat`
-    - **linux** run `./build.sh`
-    - **macOS** run `./build.sh`
+
+    ```shell
+      cd moon
+      premake5 build --release
+    ```
+
+4. Run
+    ```shell
+      premake5 run --release example/send_benchmark.lua
+    ```
+
+5. Publish
+   ```shell
+      premake5 publish
+   ```
 
 **If you want modify premake5 script, [See detail build steps](https://github.com/sniper00/moon/wiki/Build#%E7%BC%96%E8%AF%91)**
 

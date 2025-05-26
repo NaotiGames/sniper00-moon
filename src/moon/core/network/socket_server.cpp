@@ -234,13 +234,13 @@ void socket_server::connect(
                             conn->fd(server_->nextfd());
                             connections_.try_emplace(conn->fd(), conn);
                             conn->start(false);
-                            response(
+                            handle_message(params->owner, message{
+                                PTYPE_INTEGER,
                                 0,
-                                params->owner,
-                                std::to_string(conn->fd()),
+                                0,
                                 params->sessionid,
-                                PTYPE_INTEGER
-                            );
+                                conn->fd()
+                            });
                         } else {
                             //Set the fd flag to prevent timeout handling
                             conn->fd(std::numeric_limits<uint32_t>::max());
@@ -302,9 +302,12 @@ bool socket_server::write(uint32_t fd, buffer_shr_ptr_t data, socket_send_mask m
         auto buf = asio::buffer(data->data(), data->size());
         iter->second->sock.async_send(
             buf,
-            [_ = std::move(data),
-             ctx = iter->second](std::error_code /*ec*/, std::size_t /*bytes_sent*/) {
-                //do nothing
+            [this, _ = std::move(data),
+             ctx = iter->second](std::error_code ec/*ec*/, std::size_t /*bytes_sent*/) {
+                if(ec){
+                    CONSOLE_ERROR("udp write failed fd:%u %s", ctx->fd, ec.message().data());
+                    close(ctx->fd);
+                }
             }
         );
         return true;
@@ -441,9 +444,11 @@ bool socket_server::send_to(uint32_t host, std::string_view address, buffer_shr_
         iter->second->sock.async_send_to(
             buf,
             ep,
-            [_ = std::move(data),
-             ctx = iter->second](std::error_code /*ec*/, std::size_t /*bytes_sent*/) {
-                //do nothing
+            [_ = std::move(data), ep,
+             ctx = iter->second](std::error_code ec/*ec*/, std::size_t /*bytes_sent*/) {
+                if(ec){
+                    CONSOLE_ERROR("udp send_to failed %s:%d %s", ep.address().to_string().data(), (int)ep.port(), ec.message().data());
+                }
             }
         );
         return true;
@@ -472,9 +477,9 @@ bool moon::socket_server::switch_type(uint32_t fd, uint8_t new_type) {
     return false;
 }
 
-std::array<char, socket_server::addr_v6_size>
+std::string_view
 socket_server::encode_endpoint(const address& addr, port_type port) {
-    std::array<char, socket_server::addr_v6_size> buf {};
+    static thread_local std::array<char, socket_server::addr_v6_size> buf {};
     size_t size = 0;
     if (addr.is_v4()) {
         buf[0] = '4';
@@ -490,7 +495,7 @@ socket_server::encode_endpoint(const address& addr, port_type port) {
         size += bytes.size();
     }
     memcpy(buf.data() + size, &port, sizeof(port));
-    return buf;
+    return std::string_view{buf.data(), size + sizeof(port)};
 }
 
 connection_ptr_t
@@ -528,14 +533,14 @@ void socket_server::response(
         CONSOLE_ERROR("%s", std::string(content).data());
         return;
     }
-    response_.set_sender(sender);
-    response_.set_receiver(0);
-    response_.as_buffer()->clear();
-    response_.write_data(content);
-    response_.set_sessionid(sessionid);
-    response_.set_type(type);
 
-    handle_message(receiver, response_);
+    handle_message(receiver, message{
+        type,
+        sender,
+        0,
+        sessionid,
+        content
+    });
 }
 
 void socket_server::add_connection(
@@ -550,7 +555,14 @@ void socket_server::add_connection(
 
         if (sessionid != 0) {
             asio::dispatch(from->context_, [from, ctx, sessionid, fd = c->fd()] {
-                from->response(ctx->fd, ctx->owner, std::to_string(fd), sessionid, PTYPE_INTEGER);
+                from->handle_message(ctx->owner, message{
+                    PTYPE_INTEGER,
+                    0,
+                    0,
+                    sessionid,
+                    fd
+                });
+
             });
         }
     });
@@ -561,7 +573,7 @@ service* socket_server::find_service(uint32_t serviceid) {
 }
 
 void socket_server::timeout() {
-    timer_.expires_after(std::chrono::seconds(10));
+    timer_.expires_after(std::chrono::seconds(5));
     timer_.async_wait([this](const asio::error_code& e) {
         if (e) {
             return;
@@ -582,8 +594,8 @@ void socket_server::do_receive(const udp_context_ptr_t& ctx) {
     auto buf = ctx->msg.as_buffer();
     buf->clear();
     //reserve addr_v6_size bytes for address
-    buf->commit(addr_v6_size);
-    buf->seek(addr_v6_size, buffer::seek_origin::Begin);
+    buf->commit_unchecked(addr_v6_size);
+    buf->consume_unchecked(addr_v6_size);
 
     auto [k, v] = buf->writeable();
     ctx->sock.async_receive_from(
@@ -592,12 +604,12 @@ void socket_server::do_receive(const udp_context_ptr_t& ctx) {
         [this, ctx](std::error_code ec, std::size_t bytes_recvd) {
             if (!ec && bytes_recvd > 0) {
                 auto b = ctx->msg.as_buffer();
-                b->commit(bytes_recvd);
+                b->commit_unchecked(bytes_recvd);
                 auto bytes = encode_endpoint(ctx->from_ep.address(), ctx->from_ep.port());
-                b->write_front(bytes.data(), bytes.size());
-                ctx->msg.set_sender(ctx->fd);
-                ctx->msg.set_receiver(0);
-                ctx->msg.set_type(PTYPE_SOCKET_UDP);
+                [[maybe_unused]] bool always_ok = b->write_front(bytes.data(), bytes.size());
+                ctx->msg.sender = ctx->fd;
+                ctx->msg.receiver = 0;
+                ctx->msg.type = PTYPE_SOCKET_UDP;
                 handle_message(ctx->owner, ctx->msg);
             }
             do_receive(ctx);

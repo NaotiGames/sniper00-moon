@@ -212,13 +212,11 @@ private:
 
         auto answer = upgrade_response(sec_ws_key, protocol);
         send_response(answer);
-        auto msg = message { n };
-        msg.set_type(type_);
-        msg.write_data(std::string_view { cache_.data(), n });
-        msg.set_receiver(static_cast<uint8_t>(socket_data_type::socket_accept));
-        handle_message(std::move(msg));
+        handle_message(message {
+            type_, 0, static_cast<uint8_t>(socket_data_type::socket_accept), 0, std::string_view { cache_.data(), n }
+        });
 
-        cache_.consume(n);
+        cache_.consume_unchecked(n);
 
         handle_frame();
 
@@ -243,7 +241,7 @@ private:
 
     void send_response(std::string_view s, bool will_close = false) {
         auto buf = std::make_shared<buffer>(s.size());
-        buf->write_back(s.data(), s.size());
+        buf->write_back(s);
         buf->add_bitmask(
             socket_send_mask::raw | (will_close ? socket_send_mask::close : socket_send_mask::none)
         );
@@ -372,11 +370,11 @@ private:
             );
         }
 
-        cache_.consume(header_size);
+        cache_.consume_unchecked(header_size);
 
         if (nullptr == data_) {
             data_ = buffer::make_unique(reallen + BUFFER_OPTION_CHEAP_PREPEND);
-            data_->commit(BUFFER_OPTION_CHEAP_PREPEND);
+            data_->commit_unchecked(BUFFER_OPTION_CHEAP_PREPEND);
         }
 
         // Calculate the difference between the cache size and the expected size
@@ -385,8 +383,8 @@ private:
         // If the cache size is greater than or equal to the expected size, consume the expected size
         // Otherwise, consume the entire cache
         size_t consume_size = (diff >= 0 ? reallen : cache_.size());
-        data_->write_back(cache_.data(), consume_size);
-        cache_.consume(consume_size);
+        data_->write_back({cache_.data(), consume_size});
+        cache_.consume_unchecked(consume_size);
 
         if (diff >= 0) {
             return on_message(fh);
@@ -409,7 +407,7 @@ private:
     }
 
     void on_message(ws::frame_header fh) {
-        data_->seek(BUFFER_OPTION_CHEAP_PREPEND);
+        data_->consume_unchecked(BUFFER_OPTION_CHEAP_PREPEND);
 
         if (fh.mask) {
             // unmask data:
@@ -423,28 +421,31 @@ private:
         if (fh.op == ws::opcode::close) {
             return error(
                 make_error_code(moon::error::ws_closed),
-                std::string { data_->data(), data_->size() }
+                moon::escape_print(std::string { data_->data(), data_->size() })
             );
         }
 
-        auto msg = message { std::move(data_) };
-        msg.set_type(type_);
+        // auto msg = message { std::move(data_) };
+        // msg.set_type(type_);
 
+        uint8_t sub_type = 0;
         switch (fh.op) {
             case ws::opcode::ping: {
-                msg.set_receiver(static_cast<uint8_t>(socket_data_type::socket_ping));
+                sub_type = static_cast<uint8_t>(socket_data_type::socket_ping);
                 break;
             }
             case ws::opcode::pong: {
-                msg.set_receiver(static_cast<uint8_t>(socket_data_type::socket_pong));
+                sub_type = static_cast<uint8_t>(socket_data_type::socket_pong);
                 break;
             }
             default:
-                msg.set_receiver(static_cast<uint8_t>(socket_data_type::socket_recv));
+                sub_type = static_cast<uint8_t>(socket_data_type::socket_recv);
                 break;
         }
 
-        handle_message(std::move(msg));
+        handle_message(message {
+            type_, 0, sub_type, 0, std::move(data_)
+        });
 
         handle_frame();
     }
@@ -486,8 +487,10 @@ private:
 
     buffer encode_frame(const buffer_shr_ptr_t& data) const {
         buffer payload { 16 };
-        payload.commit(16);
-        payload.seek(16);
+        payload.commit_unchecked(16);
+        payload.consume_unchecked(16);
+
+        [[maybe_unused]] bool always_ok = false;
 
         uint64_t size = data->size();
 
@@ -497,7 +500,7 @@ private:
             for (uint64_t i = 0; i < size; i++) {
                 d[i] = d[i] ^ mask[i % mask.size()];
             }
-            payload.write_front(mask.data(), mask.size());
+            always_ok = payload.write_front(mask.data(), mask.size());
         }
 
         uint8_t payload_len = 0;
@@ -507,11 +510,11 @@ private:
             payload_len = static_cast<uint8_t>(PAYLOAD_MID_LEN);
             uint16_t n = (uint16_t)size;
             moon::host2net(n);
-            payload.write_front(&n, 1);
+            always_ok = payload.write_front(&n, 1);
         } else {
             payload_len = static_cast<uint8_t>(PAYLOAD_MAX_LEN);
             moon::host2net(size);
-            payload.write_front(&size, 1);
+            always_ok = payload.write_front(&size, 1);
         }
 
         //messages from the client must be masked
@@ -519,7 +522,7 @@ private:
             payload_len |= 0x80;
         }
 
-        payload.write_front(&payload_len, 1);
+        always_ok = payload.write_front(&payload_len, 1);
 
         uint8_t opcode = FIN_FRAME_FLAG | static_cast<uint8_t>(ws::opcode::binary);
 
@@ -531,7 +534,7 @@ private:
             opcode = FIN_FRAME_FLAG | static_cast<uint8_t>(ws::opcode::pong);
         }
 
-        payload.write_front(&opcode, 1);
+        always_ok = payload.write_front(&opcode, 1);
         return payload;
     }
 

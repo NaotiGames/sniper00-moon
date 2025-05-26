@@ -87,7 +87,7 @@ public:
         *(it++) = static_cast<char>(enable_stdout);
         *(it++) = static_cast<char>(level);
         size_t offset = format_header(std::addressof(*it), level, serviceid);
-        line.commit(2 + offset);
+        line.commit_unchecked(2 + offset);
         return line;
     }
 
@@ -102,7 +102,7 @@ public:
                 return;
 
             buffer line = make_line(console, level, serviceid, s.size());
-            line.write_back(s.data(), s.size());
+            line.write_back(s);
             log_queue_.push_back(std::move(line));
             ++size_;
         } catch (const std::exception& e) {
@@ -191,25 +191,33 @@ private:
             auto bconsole = static_cast<bool>(*(p++));
             auto level = static_cast<LogLevel>(*(p++));
             auto str = std::string_view { p, it.size() - 2 };
+            std::ostream* stream = nullptr;
             if (bconsole) {
                 switch (level) {
                     case LogLevel::Error:
-                        std::cerr << termcolor::red << str;
+                        stream = &std::cerr;
+                        *stream << termcolor::red;
                         break;
                     case LogLevel::Warn:
-                        std::cout << termcolor::yellow << str;
+                        stream = &std::cout;
+                        *stream << termcolor::yellow;
                         break;
                     case LogLevel::Info:
-                        std::cout << termcolor::white << str;
+                        stream = &std::cout;
+                        *stream << termcolor::white;
                         break;
                     case LogLevel::Debug:
-                        std::cout << termcolor::green << str;
+                        stream = &std::cout;
+                        *stream << termcolor::green;
                         break;
                     default:
                         break;
                 }
-                if (str.back() != '\n')
-                    std::cout << termcolor::white << '\n';
+                if (stream != nullptr) {
+                    *stream << str << termcolor::white;
+                    if (str.back() != '\n')
+                        *stream << '\n';
+                }
             }
 
             if (fp_) {

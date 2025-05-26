@@ -115,7 +115,7 @@ public:
 
     bool switch_type(uint32_t fd, uint8_t new_type);
 
-    static std::array<char, socket_server::addr_v6_size>
+    static std::string_view
     encode_endpoint(const address& addr, port_type port);
 
 private:
@@ -150,7 +150,6 @@ private:
     worker* worker_;
     asio::io_context& context_;
     asio::steady_timer timer_;
-    message response_;
 
     std::unordered_map<uint32_t, acceptor_context_ptr_t> acceptors_;
     std::unordered_map<uint32_t, connection_ptr_t> connections_;
@@ -161,7 +160,7 @@ template<typename Message>
 void socket_server::handle_message(uint32_t serviceid, Message&& m) {
     auto s = find_service(serviceid);
     if (nullptr == s) {
-        close(m.sender());
+        close(m.sender);
         return;
     }
     moon::handle_message(s, std::forward<Message>(m));

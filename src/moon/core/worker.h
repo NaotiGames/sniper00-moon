@@ -43,7 +43,7 @@ public:
     }
 
     size_t mq_size() const {
-        return mqsize_.load(std::memory_order_acquire);
+        return mq_.size() + swapped_size_.load(std::memory_order_relaxed);
     }
 
     uint32_t alive();
@@ -53,7 +53,7 @@ public:
     }
 
     uint32_t count() const {
-        return count_.load(std::memory_order_acquire);
+        return count_.load(std::memory_order_relaxed);
     }
 
     void run();
@@ -61,6 +61,8 @@ public:
     void stop();
 
     void wait();
+
+    void signal(int val);
 
 private:
     service* handle_one(service* s, message&& msg);
@@ -70,12 +72,13 @@ private:
 private:
     std::atomic_bool shared_ = true;
     std::atomic_uint32_t count_ = 0;
-    std::atomic_size_t mqsize_ = 0;
+    std::atomic_size_t swapped_size_ = 0;
     uint32_t nextid_ = 0;
     uint32_t workerid_ = 0;
     uint32_t version_ = 0;
     double cpu_ = 0.0;
     server* server_;
+    std::atomic<service*> current_ = nullptr;
     asio::io_context io_ctx_;
     asio_work_type work_;
     std::thread thread_;

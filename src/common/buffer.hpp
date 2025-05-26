@@ -5,11 +5,8 @@
 #include <cstring>
 #include <iostream>
 #include <memory>
-#include <string>
 #include <type_traits>
 #include <utility>
-#include <vector>
-
 namespace moon {
 template<typename ValueType>
 class buffer_iterator {
@@ -141,7 +138,7 @@ class base_buffer {
         }
 
         compressed_pair& operator=(compressed_pair&& other) noexcept {
-            if (this != std::addressof(*other)) {
+            if (this != std::addressof(other)) {
                 if (nullptr != data)
                     first().deallocate(data, capacity);
                 bitmask = other.bitmask;
@@ -248,76 +245,99 @@ public:
 
     base_buffer clone() const {
         base_buffer b { pair_.capacity };
-        b.write_back(data(), size());
+        b.write_back({ data(), size() });
         return b;
     }
 
+    void write_back(std::string_view data) {
+        pair_.prepare(data.size());
+        unsafe_write_back(data);
+    }
+
+    void unsafe_write_back(std::string_view data) {
+        assert(pair_.writepos + data.size() <= pair_.capacity);
+        auto buf = pair_.data + pair_.writepos;
+        memcpy(buf, data.data(), data.size());
+        pair_.writepos += data.size();
+    }
+
+    template<typename T, std::enable_if_t<std::is_arithmetic_v<T>, int> = 0>
+    void write_back(T val) {
+        pair_.prepare(sizeof(T));
+        unsafe_write_back(val);
+    }
+
+    template<typename T, std::enable_if_t<std::is_arithmetic_v<T>, int> = 0>
+    void unsafe_write_back(T val) {
+        constexpr size_t n = sizeof(T);
+        assert(pair_.writepos + n <= pair_.capacity);
+        auto buf = pair_.data + pair_.writepos;
+        if constexpr (n == 1) {
+            *buf = val;
+            pair_.writepos += 1;
+        } else {
+            memcpy(buf, &val, n);
+            pair_.writepos += n;
+        }
+    }
+
     template<typename T>
-    void write_back(const T* Indata, size_t count) {
-        static_assert(std::is_trivially_copyable<T>::value, "type T must be trivially copyable");
-        if (nullptr == Indata || 0 == count)
-            return;
-        size_t n = sizeof(T) * count;
-        auto space = pair_.prepare(n);
-        memcpy(space.first, Indata, space.second);
-        pair_.writepos += n;
-    }
-
-    void write_back(char c) {
-        *(pair_.prepare(1).first) = c;
-        ++pair_.writepos;
-    }
-
-    void unsafe_write_back(char c) {
-        *(pair_.data + (pair_.writepos++)) = c;
-    }
-
-    template<typename T>
+    [[nodiscard("Return value indicates if write_front operation succeeded")]]
     bool write_front(const T* Indata, size_t count) noexcept {
-        static_assert(std::is_trivially_copyable<T>::value, "type T must be trivially copyable");
+        static_assert(
+            std::is_trivially_copyable_v<T>,
+            "Type T must be trivially copyable for memory safety in binary operations"
+        );
         if (nullptr == Indata || 0 == count)
             return false;
 
         size_t n = sizeof(T) * count;
 
         if (n > pair_.readpos) {
-            assert(false);
             return false;
         }
 
         pair_.readpos -= n;
-        auto* buff = reinterpret_cast<T*>(std::addressof(*begin()));
+        auto* buff = std::addressof(*begin());
         memcpy(buff, Indata, n);
         return true;
     }
 
     template<typename T, typename = std::enable_if_t<std::is_arithmetic_v<T>>>
-    bool write_chars(T value) {
+    void write_chars(T value) {
+        /*
+        ** Maximum length of the conversion of a number to a string. Must be
+        ** enough to accommodate both LUA_INTEGER_FMT and LUA_NUMBER_FMT.
+        ** (For a long long int, this is 19 digits plus a sign and a final '\0',
+        ** adding to 21. For a long double, it can go to a sign, 33 digits,
+        ** the dot, an exponent letter, an exponent sign, 5 exponent digits,
+        ** and a final '\0', adding to 43.)
+        */
         static constexpr size_t MAX_NUMBER_2_STR = 44;
         auto space = pair_.prepare(MAX_NUMBER_2_STR);
         auto* b = space.first;
 #ifndef _MSC_VER //std::to_chars in C++17: gcc and clang only integral types supported
         if constexpr (std::is_floating_point_v<T>) {
             int len = std::snprintf(b, MAX_NUMBER_2_STR, "%.16g", value);
-            if (len < 0)
-                return false;
-            commit(len);
-            return true;
+            assert(len >= 0);
+            commit_unchecked(len);
         } else
 #endif
         {
             auto* e = b + MAX_NUMBER_2_STR;
             auto res = std::to_chars(b, e, value);
-            if (res.ec != std::errc())
-                return false;
-            commit(res.ptr - b);
-            return true;
+            assert(res.ec == std::errc());
+            commit_unchecked(res.ptr - b);
         }
     }
 
     template<typename T>
+    [[nodiscard("Return value indicates if read operation succeeded")]]
     bool read(T* Outdata, size_t count) noexcept {
-        static_assert(std::is_trivially_copyable<T>::value, "type T must be trivially copyable");
+        static_assert(
+            std::is_trivially_copyable_v<T>,
+            "Type T must be trivially copyable for memory safety in binary operations"
+        );
         if (nullptr == Outdata || 0 == count)
             return false;
 
@@ -333,29 +353,37 @@ public:
         return true;
     }
 
-    void consume(std::size_t n) noexcept {
-        seek(n);
+    [[nodiscard("Return value indicates if consume operation succeeded")]]
+    bool consume(std::size_t n) noexcept {
+        if (pair_.readpos + n > pair_.writepos) {
+            return false;
+        }
+        pair_.readpos += n;
+        return true;
+    }
+
+    void consume_unchecked(std::size_t n) noexcept {
+        assert(pair_.readpos + n <= pair_.capacity);
+        pair_.readpos += n;
     }
 
     //set read or forward read pos
+    [[nodiscard("Return value indicates if seek operation succeeded")]]
     bool seek(size_t offset, seek_origin s = seek_origin::Current) noexcept {
         switch (s) {
             case seek_origin::Begin:
                 if (offset > pair_.writepos) {
-                    assert(false);
                     return false;
                 }
                 pair_.readpos = offset;
                 break;
             case seek_origin::Current:
                 if (pair_.readpos + offset > pair_.writepos) {
-                    assert(false);
                     return false;
                 }
                 pair_.readpos += offset;
                 break;
             default:
-                assert(false);
                 return false;
         }
         return true;
@@ -366,12 +394,18 @@ public:
         pair_.bitmask = 0;
     }
 
-    void commit(std::size_t n) noexcept {
-        pair_.writepos += n;
-        assert(pair_.writepos <= pair_.capacity);
-        if (pair_.writepos >= pair_.capacity) {
-            pair_.writepos = pair_.capacity;
+    [[nodiscard("Return value indicates if commit operation succeeded")]]
+    bool commit(std::size_t n) noexcept {
+        if (pair_.writepos + n > pair_.capacity) {
+            return false;
         }
+        pair_.writepos += n;
+        return true;
+    }
+
+    void commit_unchecked(std::size_t n) noexcept {
+        assert(pair_.writepos + n <= pair_.capacity);
+        pair_.writepos += n;
     }
 
     std::pair<pointer, size_t> prepare(size_t need) {
@@ -426,22 +460,31 @@ public:
 
     template<typename Enum>
     void add_bitmask(Enum e) noexcept {
-        static_assert(std::is_enum_v<Enum> && std::is_same_v<std::underlying_type_t<Enum>, uint8_t>);
-        uint8_t v = (uint8_t)pair_.bitmask;
+        static_assert(
+            std::is_enum_v<Enum> && std::is_same_v<std::underlying_type_t<Enum>, uint8_t>,
+            "Enum type must be an enum with uint8_t as its underlying type to fit in the 8-bit bitmask"
+        );
+        auto v = (uint8_t)pair_.bitmask;
         v |= (uint8_t)e;
         pair_.bitmask = v;
     }
 
     template<typename Enum>
     bool has_bitmask(Enum e) noexcept {
-        static_assert(std::is_enum_v<Enum> && std::is_same_v<std::underlying_type_t<Enum>, uint8_t>);
+        static_assert(
+            std::is_enum_v<Enum> && std::is_same_v<std::underlying_type_t<Enum>, uint8_t>,
+            "Enum type must be an enum with uint8_t as its underlying type to fit in the 8-bit bitmask"
+        );
         uint8_t v = (uint8_t)pair_.bitmask;
         return ((v & (uint8_t)e) != 0);
     }
 
     template<typename Enum>
     void clear_bitmask(Enum e) noexcept {
-        static_assert(std::is_enum_v<Enum> && std::is_same_v<std::underlying_type_t<Enum>, uint8_t>);
+        static_assert(
+            std::is_enum_v<Enum> && std::is_same_v<std::underlying_type_t<Enum>, uint8_t>,
+            "Enum type must be an enum with uint8_t as its underlying type to fit in the 8-bit bitmask"
+        );
         uint8_t v = (uint8_t)pair_.bitmask;
         v &= ~(uint8_t)e;
         pair_.bitmask = v;
