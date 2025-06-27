@@ -339,9 +339,13 @@ void open_custom_libs(lua_State* L) {
     REGISTER_CUSTOM_LIBRARY("mongo.driver", luaopen_mongo_driver);
     REGISTER_CUSTOM_LIBRARY("navmesh", luaopen_navmesh);
     REGISTER_CUSTOM_LIBRARY("uuid", luaopen_uuid);
-    REGISTER_CUSTOM_LIBRARY("snowflake", luaopen_snowflake);
     REGISTER_CUSTOM_LIBRARY("schema", luaopen_schema);
     REGISTER_CUSTOM_LIBRARY("fmt", luaopen_fmt);
     REGISTER_CUSTOM_LIBRARY("crypto.scram", luaopen_crypto_scram);
+
+    // january
+    REGISTER_CUSTOM_LIBRARY("signal", luaopen_signal);
+    REGISTER_CUSTOM_LIBRARY("snowflake", luaopen_snowflake);
+    REGISTER_CUSTOM_LIBRARY("process", luaopen_process);
 }
 }
