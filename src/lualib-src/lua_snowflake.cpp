@@ -14,8 +14,8 @@ const int DATACENTER_ID_BITS = 5;
 const int WORKER_ID_BITS = 5;
 const int SEQUENCE_BITS = 12;
 
-class Snowflake
-{
+class Snowflake {
+
 public:
     Snowflake(int datacenter_id, int worker_id)
         : datacenter_id_(datacenter_id)
@@ -95,8 +95,7 @@ private:
     }
 };
 
-struct snowflake_state
-{
+struct snowflake_state {
 public:
     void init(int datacenter_id, int worker_id)
     {
@@ -130,8 +129,7 @@ private:
 
 snowflake_state g_snowflake;
 
-static int linit(lua_State* L)
-{
+static int linit(lua_State* L) {
     int datacenter_id = (int)luaL_checkinteger(L, 1);
     int worker_id = (int)luaL_checkinteger(L, 2);
 
@@ -143,8 +141,7 @@ static int linit(lua_State* L)
     return 0;
 }
 
-static int lnext(lua_State* L)
-{
+static int lnext(lua_State* L) {
     uint64_t id = 0;
     if (!g_snowflake.next(id))
     {
@@ -163,15 +160,14 @@ static int lnext(lua_State* L)
 
 extern "C"
 {
-    int LUAMOD_API luaopen_snowflake(lua_State* L)
-    {
-        luaL_Reg l[] = {
-            {"init",linit},
-            {"next",lnext },
-            {NULL,NULL}
-        };
-        luaL_checkversion(L);
-        luaL_newlib(L, l);
-        return 1;
-    }
+int LUAMOD_API luaopen_snowflake(lua_State* L) {
+    luaL_Reg l[] = {
+        { "init", linit },
+        { "next", lnext },
+        { nullptr, nullptr }
+    };
+    luaL_checkversion(L);
+    luaL_newlib(L, l);
+    return 1;
+}
 }
