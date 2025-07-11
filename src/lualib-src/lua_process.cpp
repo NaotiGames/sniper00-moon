@@ -176,13 +176,42 @@ static int lclose_proc(lua_State* L) {
         return lua_error(L);
     }
 
+    lua_Integer timeout = luaL_optinteger(L, 2, 0);
+
 #ifdef _WIN32
     if (ph->handle) {
+        if (timeout > 0) {
+            if (PostMessage((HWND)-1, WM_CLOSE, 0, 0)) {
+                DWORD waitResult = WaitForSingleObject(ph->handle, static_cast<DWORD>(timeout * 1000));
+                if (waitResult == WAIT_OBJECT_0) {
+                    lua_pushboolean(L, true);
+                    CloseHandle(ph->handle);
+                    return 1;
+                }
+            }
+        }
+
         TerminateProcess(ph->handle, 0);
         CloseHandle(ph->handle);
     }
 #else
-    kill(ph->pid, SIGTERM);
+    if (timeout > 0) {
+        kill(ph->pid, SIGTERM);
+
+        int status;
+        pid_t ret;
+        while (timeout > 0) {
+            ret = waitpid(ph->pid, &status, WNOHANG);
+            if (ret == ph->pid) {
+                lua_pushboolean(L, true);
+                return 1;
+            }
+            sleep(1);
+            timeout--;
+        }
+    }
+
+    kill(ph->pid, SIGKILL);
     waitpid(ph->pid, NULL, 0);
 #endif
 

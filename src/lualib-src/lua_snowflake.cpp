@@ -11,8 +11,8 @@
 #define METANAME "lsnowflake"
 
 const int DATACENTER_ID_BITS = 5;
-const int WORKER_ID_BITS = 5;
-const int SEQUENCE_BITS = 12;
+const int WORKER_ID_BITS = 10;
+const int SEQUENCE_BITS = 8;
 
 class Snowflake {
 
@@ -72,7 +72,7 @@ private:
     const int worker_id_shift = SEQUENCE_BITS;
     const int timestamp_left_shift = SEQUENCE_BITS + WORKER_ID_BITS + DATACENTER_ID_BITS;
 
-    const uint64_t epoch = 1577836800000; // 2020-01-01 00:00:00 UTC in milliseconds
+    const uint64_t epoch = 1735660800000; // 2025-01-01 00:00:00 UTC in milliseconds
 
     int datacenter_id_;
     int worker_id_;
