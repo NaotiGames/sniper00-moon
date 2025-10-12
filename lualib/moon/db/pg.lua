@@ -26,8 +26,6 @@ local assert       = assert
 local tointeger    = math.tointeger
 local tonumber     = tonumber
 
-local convert_null = true
-
 local flipped
 flipped = function(t)
     local flipped_t = {}
@@ -538,12 +536,7 @@ local function parse_row_data(data_row, fields)
         local field_name = field.name
         local len = decode_int(strsub(data_row, offset, offset + 3))
         offset = offset + 4 -- Move past length
-        if len < 0 then -- Handle NULL value
-            if convert_null then
-                out[field_name] = NULL
-            end
-            -- No data follows for NULL, so loop continues
-        else
+        if len >= 0 then
             local value = strsub(data_row, offset, offset + len - 1)
             offset = offset + len -- Move past value data
             local fn = field.converter -- Use pre-looked-up converter
