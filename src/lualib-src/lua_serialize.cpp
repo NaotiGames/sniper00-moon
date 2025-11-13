@@ -290,8 +290,8 @@ static void* get_pointer(lua_State* L, buffer_view* buf) {
     return userdata;
 }
 
-static void get_buffer(lua_State* L, buffer_view* buf, int len) {
-    if (int(buf->size()) < len) {
+static void get_buffer(lua_State* L, buffer_view* buf, size_t len) {
+    if (buf->size() < len) {
         invalid_stream(L, buf);
     }
     lua_pushlstring(L, buf->data(), len);
@@ -348,7 +348,7 @@ static void push_value(lua_State* L, buffer_view* buf, int type, int cookie) {
             lua_pushlightuserdata(L, get_pointer(L, buf));
             break;
         case TYPE_SHORT_STRING:
-            get_buffer(L, buf, cookie);
+            get_buffer(L, buf, (size_t)cookie);
             break;
         case TYPE_LONG_STRING: {
             if (cookie == 2) {
@@ -391,15 +391,14 @@ static int pack(lua_State* L) {
         return 0;
     }
 
-    auto buf = new buffer {};
     try {
+        auto buf = std::make_unique<moon::buffer>();
         for (int i = 1; i <= n; i++) {
-            pack_one(L, buf, i, 0);
+            pack_one(L, buf.get(), i, 0);
         }
-        lua_pushlightuserdata(L, buf);
+        lua_pushlightuserdata(L, buf.release());
         return 1;
     } catch (const std::exception& e) {
-        delete buf;
         lua_pushstring(L, e.what());
     }
     return lua_error(L);
@@ -471,7 +470,7 @@ static int peek_one(lua_State* L) {
         seek = lua_toboolean(L, 2);
     }
 
-    buffer* buf = (buffer*)lua_touserdata(L, 1);
+    auto* buf = (buffer*)lua_touserdata(L, 1);
     buffer_view br(buf->data(), buf->size());
 
     uint8_t type = 0;

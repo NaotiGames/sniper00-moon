@@ -7,7 +7,7 @@ on: [push, pull_request]
 
 jobs:
   macos-clang:
-    runs-on: macos-latest
+    runs-on: macos-15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -16,8 +16,9 @@ jobs:
       - name: Build
         run: |
           brew install premake
+          premake5 add --package=https://github.com/sniper00/lrust.git
           premake5 build --release
       - name: Test
         run: |
-          chmod +x build/bin/Release/moon
+          chmod +x target/release/moon
           premake5 run --release example/test/main_test.lua
