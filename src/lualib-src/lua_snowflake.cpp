@@ -64,8 +64,6 @@ public:
     }
 
 private:
-    const int max_datacenter_id = (1 << DATACENTER_ID_BITS) - 1;
-    const int max_worker_id = (1 << WORKER_ID_BITS) - 1;
     const int sequence_mask = (1 << SEQUENCE_BITS) - 1;
 
     const int datacenter_id_shift = SEQUENCE_BITS + WORKER_ID_BITS;
@@ -133,8 +131,8 @@ static int linit(lua_State* L) {
     int datacenter_id = (int)luaL_checkinteger(L, 1);
     int worker_id = (int)luaL_checkinteger(L, 2);
 
-    luaL_argcheck(L, (datacenter_id > 0 && datacenter_id < (1 << DATACENTER_ID_BITS)), 1, "datacenter_id out off limit");
-    luaL_argcheck(L, (worker_id > 0 && worker_id < (1 << WORKER_ID_BITS)), 2, "worker_id out off limit");
+    luaL_argcheck(L, (datacenter_id >= 0 && datacenter_id < (1 << DATACENTER_ID_BITS)), 1, "datacenter_id out off limit");
+    luaL_argcheck(L, (worker_id >= 0 && worker_id < (1 << WORKER_ID_BITS)), 2, "worker_id out off limit");
 
     g_snowflake.init(datacenter_id, worker_id);
 
