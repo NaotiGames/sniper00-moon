@@ -1,5 +1,10 @@
 #include "lua.hpp"
-#ifndef _WIN32
+#if defined(__linux__)
+#define SUPPORT_SIGNAL 1
+#else
+#define SUPPORT_SIGNAL 0
+#endif
+#if SUPPORT_SIGNAL
 #include <errno.h>
 #include <signal.h>
 #include <string.h>
@@ -9,9 +14,7 @@
 #define METANAME "lsignal"
 
 static int lsigqueue(lua_State* L) {
-#ifdef _WIN32
-    return luaL_error(L, "signal sending not supported on Windows");
-#else
+#if SUPPORT_SIGNAL
     lua_Integer pid = luaL_checkinteger(L, 1);
     lua_Integer sigrt = luaL_checkinteger(L, 2);
     lua_Integer sival = luaL_checkinteger(L, 3);
@@ -27,6 +30,8 @@ static int lsigqueue(lua_State* L) {
 
     lua_pushboolean(L, 1);
     return 1;
+#else
+    return luaL_error(L, "signal sending not supported on this platform");
 #endif
 }
 

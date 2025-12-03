@@ -1,7 +1,7 @@
 #include "lua.hpp"
 #include <string>
 #include <vector>
-#ifdef _WIN32
+#if defined(_WIN32) || defined(_WIN64)
 #include <tchar.h>
 #include <windows.h>
 #else
@@ -18,7 +18,7 @@ extern char** environ;
 #define METANAME "lprocess"
 #define PROCESS_HANDLE_META "ProcessHandleMeta"
 
-#ifdef _WIN32
+#if defined(_WIN32) || defined(_WIN64)
 std::string GetLastErrorMessage(DWORD errCode) {
     LPSTR msgBuf = nullptr;
     FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM, NULL, errCode, 0, (LPSTR)&msgBuf, 0, NULL);
@@ -29,7 +29,7 @@ std::string GetLastErrorMessage(DWORD errCode) {
 #endif
 
 typedef struct {
-#ifdef _WIN32
+#if defined(_WIN32) || defined(_WIN64)
     HANDLE handle;
     DWORD pid;
 #else
@@ -60,7 +60,7 @@ static int lgethandle(lua_State* L) {
     int pid = (int)luaL_checkinteger(L, 1);
 
     // First verify the process exists
-#ifdef _WIN32
+#if defined(_WIN32) || defined(_WIN64)
     HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
     if (hProcess == NULL) {
         lua_pushnil(L);
@@ -85,7 +85,7 @@ static int lgethandle(lua_State* L) {
     luaL_getmetatable(L, PROCESS_HANDLE_META);
     lua_setmetatable(L, -2);
 
-#ifdef _WIN32
+#if defined(_WIN32) || defined(_WIN64)
     ph->handle = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_TERMINATE, FALSE, pid);
     ph->pid = pid;
 #else
@@ -103,7 +103,7 @@ static int lcreate_proc(lua_State* L) {
     luaL_getmetatable(L, PROCESS_HANDLE_META);
     lua_setmetatable(L, -2);
 
-#ifdef _WIN32
+#if defined(_WIN32) || defined(_WIN64)
     bool bLaunchDetached = lua_toboolean(L, 3);
     bool bLaunchHidden = lua_toboolean(L, 4);
     bool bLaunchReallyHidden = lua_toboolean(L, 5);
@@ -179,7 +179,7 @@ static int lclose_proc(lua_State* L) {
 
     lua_Integer timeout = luaL_optinteger(L, 2, 0);
 
-#ifdef _WIN32
+#if defined(_WIN32) || defined(_WIN64)
     if (ph->handle) {
         if (timeout > 0) {
             if (PostMessage((HWND)-1, WM_CLOSE, 0, 0)) {
@@ -227,7 +227,7 @@ static int lis_running(lua_State* L) {
         return 1;
     }
 
-#ifdef _WIN32
+#if defined(_WIN32) || defined(_WIN64)
     if (ph->handle) {
         DWORD exitCode;
         if (GetExitCodeProcess(ph->handle, &exitCode)) {
