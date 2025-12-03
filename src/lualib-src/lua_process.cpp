@@ -7,6 +7,7 @@
 #else
 #include <cstring>
 #include <dirent.h>
+#include <signal.h>
 #include <spawn.h>
 #include <sys/types.h>
 #include <sys/wait.h>
