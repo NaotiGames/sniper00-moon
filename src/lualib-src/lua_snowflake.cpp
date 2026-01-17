@@ -156,9 +156,7 @@ static int lnext(lua_State* L) {
     return 1;
 }
 
-extern "C"
-{
-int LUAMOD_API luaopen_snowflake(lua_State* L) {
+LUAMOD_API int luaopen_snowflake(lua_State* L) {
     luaL_Reg l[] = {
         { "init", linit },
         { "next", lnext },
@@ -167,5 +165,4 @@ int LUAMOD_API luaopen_snowflake(lua_State* L) {
     luaL_checkversion(L);
     luaL_newlib(L, l);
     return 1;
-}
 }

@@ -263,8 +263,7 @@ static int lis_running(lua_State* L) {
     return 1;
 }
 
-extern "C" {
-int luaopen_process(lua_State* L) {
+LUAMOD_API int luaopen_process(lua_State* L) {
     luaL_newmetatable(L, PROCESS_HANDLE_META);
     lua_pop(L, 1);
 
@@ -280,5 +279,4 @@ int luaopen_process(lua_State* L) {
     luaL_checkversion(L);
     luaL_newlib(L, l);
     return 1;
-}
 }

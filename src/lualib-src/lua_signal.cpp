@@ -35,9 +35,7 @@ static int lsigqueue(lua_State* L) {
 #endif
 }
 
-extern "C"
-{
-int LUAMOD_API luaopen_signal(lua_State* L) {
+LUAMOD_API int luaopen_signal(lua_State* L) {
     luaL_Reg l[] = {
         { "sigqueue", lsigqueue },
         { nullptr, nullptr }
@@ -45,5 +43,4 @@ int LUAMOD_API luaopen_signal(lua_State* L) {
     luaL_checkversion(L);
     luaL_newlib(L, l);
     return 1;
-}
 }
