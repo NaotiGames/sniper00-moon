@@ -146,6 +146,7 @@ setmetatable(
 )
 
 -- Internal state management tables
+---@type table<integer, thread?>
 local session_id_coroutine = {}  -- Maps session IDs to coroutines
 local protocol = {}              -- Registered message protocols
 local session_watcher = {}       -- Tracks session watchers for cleanup
@@ -209,7 +210,7 @@ end
 ---@field name string The protocol name
 ---@field PTYPE integer The protocol type constant
 ---@field pack? fun(...: any): string|buffer_ptr The packing function
----@field unpack? fun(data: string|buffer_ptr, len?: integer): ...any The unpacking function
+---@field unpack? fun(data: string|cstring_ptr, len?: integer): any ...  The unpacking function
 ---@field dispatch? fun(sender: integer, session: integer, ...: any) The message handler
 ---@field israw? boolean Whether this is a raw protocol (receives message_ptr directly)
 
@@ -232,6 +233,7 @@ function moon.quit()
     for k, co in pairs(session_id_coroutine) do
         if type(co) == "thread" and co ~= running then
             co_close(co)
+            ---@diagnostic disable-next-line: assign-type-mismatch
             session_id_coroutine[k] = false
         end
     end
@@ -255,6 +257,7 @@ function moon.queryservice(name)
     if type(name) == 'string' then
         return _queryservice(name)
     end
+    ---@diagnostic disable-next-line: return-type-mismatch
     return name
 end
 
@@ -288,6 +291,7 @@ end
 --- This will return `{arg1, arg2, arg3}`.
 --- @return string[] @ An array of the command-line arguments
 function moon.args()
+    ---@diagnostic disable-next-line: param-type-mismatch, need-check-nil
     return load(moon.env("ARG"))()
 end
 
@@ -359,8 +363,9 @@ end
 --- @async
 --- @param session? integer @ An optional session ID used to map the coroutine for wakeup
 --- @param receiver? integer @ An optional receiver's service ID
+--- @param is_raw? boolean @ Whether to return raw message data instead of unpacked data
 --- @return any ... @ Returns the unpacked message if the coroutine is resumed by a message. If the coroutine is resumed by `moon.wakeup`, it returns the additional parameters passed by `moon.wakeup`. If the coroutine is broken, it returns `false` and "BREAK".
-function moon.wait(session, receiver)
+function moon.wait(session, receiver, is_raw)
     if session then
         session_id_coroutine[session] = co_running()
         if receiver then
@@ -374,11 +379,15 @@ function moon.wait(session, receiver)
 
     local a, b, c = co_yield()
     if a then
+        if is_raw then
+            return a, b
+        end
         -- sz,len,PTYPE - Message received
         return protocol[c].unpack(a, b)
     else
         -- false, "BREAK", {...} - Wakeup or error
         if session then
+            ---@diagnostic disable-next-line: assign-type-mismatch
             session_id_coroutine[session] = false
         end
 
@@ -474,7 +483,7 @@ end
 --- @param PTYPE integer @ The protocol type
 --- @param sender integer @ The sender's service ID
 --- @param session integer @ The session ID
---- @param sz string @ The message data
+--- @param sz cstring_ptr @ The message data
 --- @param len integer @ The message length
 --- @param m message_ptr @ The raw message pointer
 local function _dispatch(PTYPE, sender, session, sz, len, m)
@@ -543,9 +552,8 @@ local reg_protocol = moon.register_protocol
 --- @param fn fun(sender: integer, session: integer, ...: any) @ The message handler function
 function moon.dispatch(PTYPE, fn)
     local p = protocol[PTYPE]
-    if fn then
-        p.dispatch = fn
-    end
+    ---@diagnostic disable-next-line: need-check-nil, assign-type-mismatch
+    p.dispatch = fn
 end
 
 --- Sets the message handler for the specified protocol type.
@@ -554,10 +562,10 @@ end
 --- @param fn fun(m: message_ptr) @ The message handler function that receives raw message
 function moon.raw_dispatch(PTYPE, fn)
     local p = protocol[PTYPE]
-    if fn then
-        p.dispatch = fn
-        p.israw = true
-    end
+    ---@diagnostic disable-next-line: need-check-nil, assign-type-mismatch
+    p.dispatch = fn
+    ---@diagnostic disable-next-line: need-check-nil, assign-type-mismatch
+    p.israw = true
 end
 
 -- Register built-in protocols
@@ -609,8 +617,8 @@ reg_protocol {
         return ...
     end,
     unpack = function(sz, len)
-        local data = moon.tostring(sz, len) or "unknown error"
-        return false, data
+        ---@diagnostic disable-next-line: param-type-mismatch
+        return false, moon.tostring(sz, len) or "unknown error"
     end,
     dispatch = function(_, _, ...)
         moon.error(...)
@@ -618,6 +626,7 @@ reg_protocol {
 }
 
 -- System command handlers
+---@type table<string, fun(...: any)>
 local system_command = {}
 
 --- Handles service exit notifications
@@ -653,8 +662,10 @@ reg_protocol {
     end,
     dispatch = function(msg)
         local sender, data = _decode(msg, "SZ")
+        ---@type string[]
         local params = string.split(data, ',')
         local func = system_command[params[1]]
+        ---@diagnostic disable-next-line: unnecessary-if
         if func then
             func(sender, table.unpack(params, 2))
         end
@@ -705,7 +716,13 @@ reg_protocol {
 }
 
 -- Shutdown handling
-local cb_shutdown
+local _shutdown = function()
+    local name = moon.name
+    --- bootstrap or not unique service
+    if name == "bootstrap" or 0 == moon.queryservice(moon.name) then
+        moon.quit()
+    end
+end
 
 --- Shutdown protocol - for graceful shutdown signals
 reg_protocol {
@@ -713,15 +730,7 @@ reg_protocol {
     PTYPE = moon.PTYPE_SHUTDOWN,
     israw = true,
     dispatch = function()
-        if cb_shutdown then
-            cb_shutdown()
-        else
-            local name = moon.name
-            --- bootstrap or not unique service
-            if name == "bootstrap" or 0 == moon.queryservice(moon.name) then
-                moon.quit()
-            end
-        end
+        _shutdown()
     end
 }
 
@@ -731,7 +740,7 @@ reg_protocol {
 --- **For unique services, you generally need to register this function to handle the exit process, or use `moon.kill` to force close**
 --- @param callback fun() @ The function to be called when the process is shutting down
 function moon.shutdown(callback)
-    cb_shutdown = callback
+    _shutdown = callback
 end
 
 -------------------------- Timer Management --------------------------
@@ -757,6 +766,7 @@ reg_protocol {
             v(timerid)
         end
         local elapsed = moon.clock() - st
+        ---@diagnostic disable-next-line: unnecessary-if
         if trace and elapsed > 0.1 then
             moon.warn(string.format("Timer %s cost %ss trace '%s'", timerid, elapsed, trace))
         end
@@ -804,6 +814,7 @@ end
 -------------------------- Debug Utilities ----------------------------
 
 -- Debug command handlers
+---@type table<string,fun(...:any):any ...>
 local debug_command = {}
 
 --- Garbage collection command
@@ -840,6 +851,7 @@ reg_protocol {
     unpack = moon.unpack,
     dispatch = function(sender, session, cmd, ...)
         local func = debug_command[cmd]
+        ---@diagnostic disable-next-line: unnecessary-if
         if func then
             moon.response("debug", sender, session, func(sender, session, ...))
         else
@@ -856,6 +868,7 @@ reg_protocol {
         return ...
     end,
     unpack = function(sz, len)
+        ---@diagnostic disable-next-line: param-type-mismatch
         local s = moon.tostring(sz, len)
         return math.tointeger(string.sub(s, 1, 1)), string.sub(s, 2)
     end,
